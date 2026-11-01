@@ -1,122 +1,186 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { getFirestore } = require("firebase-admin/firestore");
 
-setGlobalOptions({ maxInstances: 5 });
+setGlobalOptions({
+  region: "us-central1",
+  maxInstances: 5,
+});
 
 initializeApp();
 
 const db = getFirestore();
 
-// Server-side product prices
-// These prices must match the website's actual product prices.
-const PRODUCTS = {
-  1: { name: "Premium Wireless Headphone", price: 2490 },
-  2: { name: "Smart Watch Series 9", price: 3590 },
-  3: { name: "Portable Bluetooth Speaker", price: 1890 },
-  4: { name: "Fast Charging Power Bank", price: 1590 },
-  5: { name: "Wireless Earbuds Pro", price: 2190 },
-  6: { name: "65W Fast Charger", price: 990 },
-};
-
 exports.placeOrder = onCall(
-  {
-    enforceAppCheck: false,
-  },
+  { enforceAppCheck: false },
   async (request) => {
-    const data = request.data || {};
-    const customer = data.customer || {};
+    try {
+      const data = request.data || {};
+      const customer = data.customer;
+      const items = data.items;
 
-    // Validate customer information
-    const name = typeof customer.name === "string"
-      ? customer.name.trim()
-      : "";
-
-    const phone = typeof customer.phone === "string"
-      ? customer.phone.trim()
-      : "";
-
-    const district = typeof customer.district === "string"
-      ? customer.district.trim()
-      : "";
-
-    const address = typeof customer.address === "string"
-      ? customer.address.trim()
-      : "";
-
-    if (name.length < 2 || name.length > 100) {
-      throw new HttpsError("invalid-argument", "Please enter a valid name.");
-    }
-
-    if (!/^01[3-9]\d{8}$/.test(phone)) {
-      throw new HttpsError("invalid-argument", "Please enter a valid Bangladesh phone number.");
-    }
-
-    if (district.length < 2 || district.length > 100) {
-      throw new HttpsError("invalid-argument", "Please enter a valid district.");
-    }
-
-    if (address.length < 8 || address.length > 500) {
-      throw new HttpsError("invalid-argument", "Please enter a valid delivery address.");
-    }
-
-    if (!Array.isArray(data.items) || data.items.length < 1 || data.items.length > 20) {
-      throw new HttpsError("invalid-argument", "Your cart is empty or contains too many items.");
-    }
-
-    // Recalculate prices and totals on the server.
-    const items = data.items.map((item) => {
-      const productId = Number(item.id);
-      const product = PRODUCTS[productId];
-      const quantity = Number(item.quantity);
-
-      if (!product || !Number.isInteger(quantity) || quantity < 1 || quantity > 10) {
-        throw new HttpsError("invalid-argument", "A product or quantity is invalid.");
+      // Customer validation
+      if (
+        !customer ||
+        typeof customer.name !== "string" ||
+        customer.name.trim().length < 2 ||
+        typeof customer.phone !== "string" ||
+        !/^01[3-9]\d{8}$/.test(customer.phone) ||
+        typeof customer.district !== "string" ||
+        customer.district.trim().length < 2 ||
+        typeof customer.address !== "string" ||
+        customer.address.trim().length < 8
+      ) {
+        throw new HttpsError(
+          "invalid-argument",
+          "Customer information is invalid."
+        );
       }
 
-      return {
-        id: productId,
-        name: product.name,
-        price: product.price,
-        quantity,
+      // Product validation
+      if (
+        !Array.isArray(items) ||
+        items.length < 1 ||
+        items.length > 20
+      ) {
+        throw new HttpsError(
+          "invalid-argument",
+          "Invalid order items."
+        );
+      }
+
+      // Get current product information from Firestore
+      const orderItems = await Promise.all(
+        items.map(async (item) => {
+          const productId = String(item.id || "");
+          const quantity = Number(item.quantity);
+
+          if (
+            !productId ||
+            !Number.isInteger(quantity) ||
+            quantity < 1 ||
+            quantity > 10
+          ) {
+            throw new HttpsError(
+              "invalid-argument",
+              "Invalid product or quantity."
+            );
+          }
+
+          const productDoc = await db
+            .collection("products")
+            .doc(productId)
+            .get();
+
+          if (!productDoc.exists) {
+            throw new HttpsError(
+              "not-found",
+              "A selected product is unavailable."
+            );
+          }
+
+          const product = productDoc.data();
+          const price = Number(product.price);
+
+          if (!Number.isFinite(price) || price < 0) {
+            throw new HttpsError(
+              "failed-precondition",
+              "Invalid product price."
+            );
+          }
+
+          return {
+            id: productDoc.id,
+            name: product.name,
+            price,
+            quantity,
+            emoji: product.emoji || "📦",
+            imageUrl: product.imageUrl || "",
+          };
+        })
+      );
+
+      // Calculate total on the server
+      const subtotal = orderItems.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0
+      );
+
+      // Read delivery settings
+      const settingsDoc = await db
+        .collection("settings")
+        .doc("store")
+        .get();
+
+      const settings = settingsDoc.exists
+        ? settingsDoc.data()
+        : {};
+
+      const deliveryCharge = Number(settings.deliveryCharge ?? 80);
+      const freeDeliveryMinimum = Number(
+        settings.freeDeliveryMinimum ?? 3000
+      );
+
+      if (
+        !Number.isFinite(deliveryCharge) ||
+        deliveryCharge < 0 ||
+        !Number.isFinite(freeDeliveryMinimum) ||
+        freeDeliveryMinimum < 0
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Invalid delivery settings."
+        );
+      }
+
+      const finalDeliveryCharge =
+        subtotal >= freeDeliveryMinimum ? 0 : deliveryCharge;
+
+      const total = subtotal + finalDeliveryCharge;
+
+      const orderNumber = `GS-${Date.now()
+        .toString()
+        .slice(-8)}`;
+
+      const order = {
+        orderNumber,
+        customer: {
+          name: customer.name.trim(),
+          phone: customer.phone.trim(),
+          district: customer.district.trim(),
+          address: customer.address.trim(),
+        },
+        items: orderItems,
+        subtotal,
+        deliveryCharge: finalDeliveryCharge,
+        total,
+        paymentMethod: "Cash on Delivery",
+        status: "Pending",
+        createdAt: new Date().toISOString(),
       };
-    });
 
-    const subtotal = items.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0
-    );
-
-    const deliveryCharge = subtotal >= 3000 ? 0 : 80;
-    const total = subtotal + deliveryCharge;
-
-    const orderNumber = `GS${Date.now().toString().slice(-8)}`;
-
-    const order = {
-      orderNumber,
-      customer: { name, phone, district, address },
-      items,
-      subtotal,
-      deliveryCharge,
-      total,
-      paymentMethod: "Cash on Delivery",
-      status: "pending",
-      createdAt: FieldValue.serverTimestamp(),
-    };
-
-    try {
-      const docRef = await db.collection("orders").add(order);
+      const orderRef = await db
+        .collection("orders")
+        .add(order);
 
       return {
         success: true,
+        orderId: orderRef.id,
         orderNumber,
-        orderId: docRef.id,
         total,
       };
     } catch (error) {
-      console.error("Failed to save order:", error);
-      throw new HttpsError("internal", "We could not save your order. Please try again.");
+      console.error("Order creation failed:", error);
+
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
+      throw new HttpsError(
+        "internal",
+        "Unable to place order. Please try again."
+      );
     }
   }
 );

@@ -1,15 +1,14 @@
 import {
-  addDoc,
   collection,
-  deleteDoc,
-  doc,
   getDocs,
   orderBy,
   query,
-  updateDoc,
+  onSnapshot,
 } from "firebase/firestore";
 
-import { db } from "@/lib/firebase";
+import type { Unsubscribe } from "firebase/firestore";
+
+import { auth, db } from "@/lib/firebase";
 
 export type OrderStatus =
   | "Pending"
@@ -19,11 +18,12 @@ export type OrderStatus =
   | "Cancelled";
 
 export type OrderItem = {
-  id: number;
+  id: string | number;
   name: string;
   price: number;
   quantity: number;
   emoji?: string;
+  imageUrl?: string;
 };
 
 export type Customer = {
@@ -48,19 +48,37 @@ export type Order = {
 
 const ORDERS_COLLECTION = "orders";
 
-// নতুন অর্ডার অনলাইনে সংরক্ষণ
-export async function createOrder(
-  order: Omit<Order, "id">
-): Promise<string> {
-  const docRef = await addDoc(
-    collection(db, ORDERS_COLLECTION),
-    order
-  );
+export type PlaceOrderResponse = {
+  success: boolean;
+  orderId: string;
+  orderNumber: string;
+  total: number;
+};
 
-  return docRef.id;
+// Create an order through the secure Next.js API
+export async function createOrder(
+  order: Pick<Order, "customer" | "items">
+): Promise<PlaceOrderResponse> {
+  const response = await fetch("/api/orders", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(order),
+  });
+
+  const result = await response.json();
+
+  if (!response.ok || !result.success) {
+    throw new Error(
+      result.error || "Unable to place your order."
+    );
+  }
+
+  return result as PlaceOrderResponse;
 }
 
-// অনলাইনে সংরক্ষিত সব অর্ডার লোড
+// Retrieve all orders
 export async function getOrders(): Promise<Order[]> {
   const ordersQuery = query(
     collection(db, ORDERS_COLLECTION),
@@ -70,24 +88,90 @@ export async function getOrders(): Promise<Order[]> {
   const snapshot = await getDocs(ordersQuery);
 
   return snapshot.docs.map((item) => ({
-    id: item.id,
     ...item.data(),
+    id: item.id,
   })) as Order[];
 }
 
-// অর্ডারের স্ট্যাটাস পরিবর্তন
+// Subscribe to real-time order updates
+export function subscribeToOrders(
+  onOrdersChange: (orders: Order[]) => void,
+  onError?: (error: Error) => void
+): Unsubscribe {
+  const ordersQuery = query(
+    collection(db, ORDERS_COLLECTION),
+    orderBy("createdAt", "desc")
+  );
+
+  return onSnapshot(
+    ordersQuery,
+    (snapshot) => {
+      const orders = snapshot.docs.map((item) => ({
+        ...item.data(),
+        id: item.id,
+      })) as Order[];
+
+      onOrdersChange(orders);
+    },
+    (error) => {
+      console.error("Real-time order listener failed:", error);
+      onError?.(error);
+    }
+  );
+}
+
+// Update order status
 export async function changeOrderStatus(
   orderId: string,
   status: OrderStatus
 ): Promise<void> {
-  await updateDoc(doc(db, ORDERS_COLLECTION, orderId), {
-    status,
-  });
+  const user = auth.currentUser;
+
+  if (!user) {
+    throw new Error("Please log in as administrator.");
+  }
+
+  const token = await user.getIdToken();
+
+  const response = await fetch(
+    `/api/admin/orders/${encodeURIComponent(orderId)}/status`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ status }),
+    }
+  );
+
+  const result = await response.json();
+
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Could not update order status.");
+  }
 }
 
-// অর্ডার মুছে ফেলা
+// Delete an order
 export async function removeOrder(
   orderId: string
 ): Promise<void> {
-  await deleteDoc(doc(db, ORDERS_COLLECTION, orderId));
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error("Please log in as administrator.");
+  }
+  const token = await user.getIdToken();
+  const response = await fetch(
+    `/api/admin/orders/${encodeURIComponent(orderId)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Could not delete order.");
+  }
 }

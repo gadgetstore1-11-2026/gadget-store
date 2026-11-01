@@ -1,17 +1,20 @@
-
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { createOrder } from "@/lib/orders";
+
 type CartItem = {
-  id: number;
+  id: string | number;
   name: string;
   category: string;
   price: number;
   quantity: number;
   emoji: string;
   color: string;
+  image?: string;
 };
 
 type Customer = {
@@ -21,64 +24,17 @@ type Customer = {
   address: string;
 };
 
+type StoreSettings = {
+  deliveryCharge: number;
+  freeDeliveryMinimum: number;
+};
+
 const STORAGE_KEY = "gadget-store-cart";
 
-const initialProducts: CartItem[] = [
-  {
-    id: 1,
-    name: "Premium Wireless Headphone",
-    category: "Audio",
-    price: 2490,
-    quantity: 1,
-    emoji: "🎧",
-    color: "#eee9ff",
-  },
-  {
-    id: 2,
-    name: "Smart Watch Series 9",
-    category: "Smart Watch",
-    price: 3590,
-    quantity: 1,
-    emoji: "⌚",
-    color: "#e5efff",
-  },
-  {
-    id: 3,
-    name: "Portable Bluetooth Speaker",
-    category: "Audio",
-    price: 1890,
-    quantity: 1,
-    emoji: "🔊",
-    color: "#e4f5ee",
-  },
-  {
-    id: 4,
-    name: "Fast Charging Power Bank",
-    category: "Accessories",
-    price: 1590,
-    quantity: 1,
-    emoji: "🔋",
-    color: "#fff0dc",
-  },
-  {
-    id: 5,
-    name: "Wireless Earbuds Pro",
-    category: "Audio",
-    price: 2190,
-    quantity: 1,
-    emoji: "🎵",
-    color: "#ffe9ee",
-  },
-  {
-    id: 6,
-    name: "65W Fast Charger",
-    category: "Accessories",
-    price: 990,
-    quantity: 1,
-    emoji: "🔌",
-    color: "#e6f1ff",
-  },
-];
+const DEFAULT_SETTINGS: StoreSettings = {
+  deliveryCharge: 80,
+  freeDeliveryMinimum: 3000,
+};
 
 const emptyCustomer: Customer = {
   name: "",
@@ -93,12 +49,20 @@ export default function CartPage() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [customer, setCustomer] = useState<Customer>(emptyCustomer);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [orderNumber, setOrderNumber] = useState("");
   const [orderTotal, setOrderTotal] = useState(0);
 
+  const [storeSettings, setStoreSettings] =
+    useState<StoreSettings>(DEFAULT_SETTINGS);
+
+  const [settingsLoading, setSettingsLoading] = useState(true);
+
+  // Format currency
   const money = (amount: number) =>
     `৳${amount.toLocaleString("en-BD")}`;
 
+  // Load cart from local storage
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -117,21 +81,71 @@ export default function CartPage() {
     }
   }, []);
 
+  // Save cart to local storage
   useEffect(() => {
     if (ready) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
     }
   }, [cart, ready]);
 
+  // Load store settings from Firebase
+  useEffect(() => {
+    async function loadStoreSettings() {
+      try {
+        const settingsRef = doc(db, "settings", "store");
+        const snapshot = await getDoc(settingsRef);
+
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+
+          setStoreSettings({
+            deliveryCharge:
+              typeof data.deliveryCharge === "number" &&
+              Number.isFinite(data.deliveryCharge) &&
+              data.deliveryCharge >= 0
+                ? data.deliveryCharge
+                : DEFAULT_SETTINGS.deliveryCharge,
+
+            freeDeliveryMinimum:
+              typeof data.freeDeliveryMinimum === "number" &&
+              Number.isFinite(data.freeDeliveryMinimum) &&
+              data.freeDeliveryMinimum >= 0
+                ? data.freeDeliveryMinimum
+                : DEFAULT_SETTINGS.freeDeliveryMinimum,
+          });
+        }
+      } catch (err) {
+        console.error("Store settings loading failed:", err);
+      } finally {
+        setSettingsLoading(false);
+      }
+    }
+
+    loadStoreSettings();
+  }, []);
+
+  // Calculate subtotal
   const subtotal = useMemo(
-    () => cart.reduce((sum, item) => sum + item.price * item.quantity, 0),
+    () =>
+      cart.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0
+      ),
     [cart]
   );
 
-  const deliveryCharge = subtotal === 0 ? 0 : subtotal >= 3000 ? 0 : 80;
+  // Calculate delivery fee
+  const deliveryCharge =
+    subtotal === 0
+      ? 0
+      : subtotal >= storeSettings.freeDeliveryMinimum
+        ? 0
+        : storeSettings.deliveryCharge;
+
   const total = subtotal + deliveryCharge;
 
-  function changeQuantity(id: number, change: number) {
+  // Change product quantity
+  function changeQuantity(id: string | number, change: number) {
     setCart((items) =>
       items
         .map((item) =>
@@ -143,193 +157,234 @@ export default function CartPage() {
     );
   }
 
-  function removeItem(id: number) {
+  // Remove product from cart
+  function removeItem(id: string | number) {
     setCart((items) => items.filter((item) => item.id !== id));
   }
 
+  // Update customer information
   function updateCustomer(field: keyof Customer, value: string) {
-    setCustomer((previous) => ({ ...previous, [field]: value }));
+    setCustomer((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+
     setError("");
   }
 
+  // Submit order
+  async function submitOrder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-async function submitOrder(event: React.FormEvent<HTMLFormElement>) {
-  event.preventDefault();
-  setError("");
+    if (submitting) return;
 
-  if (cart.length === 0) {
-    setError("তোমার কার্টে কোনো পণ্য নেই।");
-    return;
-  }
+    setError("");
 
-  if (!/^01[3-9]\d{8}$/.test(customer.phone.trim())) {
-    setError("সঠিক ১১ সংখ্যার বাংলাদেশি মোবাইল নম্বর দাও।");
-    return;
-  }
-
-  if (customer.name.trim().length < 2) {
-    setError("তোমার সম্পূর্ণ নাম লিখো।");
-    return;
-  }
-
-  if (customer.address.trim().length < 8) {
-    setError("সম্পূর্ণ ডেলিভারি ঠিকানা লিখো।");
-    return;
-  }
-
-  if (customer.district.trim().length < 2) {
-    setError("তোমার জেলার নাম লিখো।");
-    return;
-  }
-
-  try {
-    const subtotal = cart.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0
-    );
-
-    const deliveryCharge = 80;
-    const orderNumber = `GS-${Date.now()}`;
-
-    const orderId = await createOrder({
-      orderNumber,
-      customer: {
-        name: customer.name.trim(),
-        phone: customer.phone.trim(),
-        district: customer.district.trim(),
-        address: customer.address.trim(),
-      },
-      items: cart.map((item) => ({
-        id: item.id,
-        name: item.name,
-        price: item.price,
-        quantity: item.quantity,
-        emoji: item.emoji,
-      })),
-      subtotal,
-      deliveryCharge,
-      total: subtotal + deliveryCharge,
-      paymentMethod: "Cash on Delivery",
-      createdAt: new Date().toISOString(),
-      status: "Pending",
-    });
-
-    if (!orderId) {
-      throw new Error("অর্ডার সংরক্ষণ করা যায়নি।");
+    if (settingsLoading) {
+      setError("Store settings are loading. Please wait.");
+      return;
     }
 
-    setOrderNumber(orderNumber);
-    setOrderTotal(subtotal + deliveryCharge);
-    setCart([]);
-    setCheckoutOpen(false);
-    setCustomer(emptyCustomer);
-  } catch (error) {
-    console.error("Order submission failed:", error);
+    if (cart.length === 0) {
+      setError("Your cart is empty.");
+      return;
+    }
 
-    setError(
-      "অর্ডার পাঠানো যায়নি। Firebase Rules ও সংযোগ পরীক্ষা করো।"
-    );
+    if (!/^01[3-9]\d{8}$/.test(customer.phone.trim())) {
+      setError(
+        "Please enter a valid 11-digit Bangladesh mobile number."
+      );
+      return;
+    }
+
+    if (customer.name.trim().length < 2) {
+      setError("Please enter your full name.");
+      return;
+    }
+
+    if (customer.address.trim().length < 8) {
+      setError("Please enter your complete delivery address.");
+      return;
+    }
+
+    if (customer.district.trim().length < 2) {
+      setError("Please enter your district name.");
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const result = await createOrder({
+        customer: {
+          name: customer.name.trim(),
+          phone: customer.phone.trim(),
+          district: customer.district.trim(),
+          address: customer.address.trim(),
+        },
+
+        items: cart.map((item) => ({
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity,
+          emoji: item.emoji,
+        })),
+      });
+
+      if (!result.success || !result.orderId) {
+        throw new Error("Unable to save your order.");
+      }
+
+      setOrderNumber(result.orderNumber);
+      setOrderTotal(result.total);
+      setCart([]);
+      setCheckoutOpen(false);
+      setCustomer(emptyCustomer);
+
+    } catch (err) {
+      console.error("Order submission failed:", err);
+
+      const firebaseError = err as {
+        code?: string;
+        message?: string;
+      };
+
+      setError(
+        `Order failed: ${
+          firebaseError.message ||
+          firebaseError.code ||
+          "Unknown error"
+        }`
+      );
+    } finally {
+      setSubmitting(false);
+    }
   }
-}
 
-
-
-  if (!ready) {
-    return (
-      <main className="cart-page">
-        <p className="cart-loading">কার্ট লোড হচ্ছে...</p>
-      </main>
-    );
-  }
-
+  // Order success screen
   if (orderNumber) {
     return (
       <main className="cart-page">
         <div className="order-success">
           <div className="success-icon">✓</div>
-          <span className="cart-eyebrow">ORDER CONFIRMATION</span>
-          <h1>ধন্যবাদ! তোমার অর্ডার তৈরি হয়েছে।</h1>
+
+          <span className="cart-eyebrow">
+            ORDER CONFIRMATION
+          </span>
+
+          <h1>Thank You! Your Order Has Been Placed.</h1>
+
           <p>
-            এটি একটি পরীক্ষামূলক অর্ডার। বর্তমানে দোকানের সার্ভারে অর্ডার
-            পাঠানো হচ্ছে না।
+            Your order has been received successfully.
+            Our team will contact you if needed.
           </p>
 
           <div className="order-summary">
             <div>
-              <span>অর্ডার নম্বর</span>
+              <span>Order Number</span>
               <strong>{orderNumber}</strong>
             </div>
+
             <div>
-              <span>পেমেন্ট</span>
+              <span>Payment Method</span>
               <strong>Cash on Delivery</strong>
             </div>
+
             <div>
-              <span>মোট মূল্য</span>
+              <span>Total Amount</span>
               <strong>{money(orderTotal)}</strong>
             </div>
           </div>
 
           <Link href="/" className="cart-primary-button">
-            হোমপেজে ফিরে যাও
+            Continue Shopping
           </Link>
         </div>
       </main>
     );
   }
 
+  // Loading screen
+  if (!ready) {
+    return (
+      <main className="cart-page">
+        <p className="cart-loading">Loading your cart...</p>
+      </main>
+    );
+  }
+
   return (
     <main className="cart-page">
+      {/* Header */}
       <header className="cart-header">
         <Link href="/" className="cart-brand">
           <span className="cart-brand-icon">G</span>
+
           <span>
             <strong>GADGET</strong>
             <small>STORE</small>
           </span>
         </Link>
 
-        <div className="secure-label">🔒 Secure Checkout</div>
+        <div className="secure-label">
+          🔒 Secure Checkout
+        </div>
 
         <Link href="/" className="continue-link">
-          ← কেনাকাটা চালিয়ে যাও
+          ← Continue Shopping
         </Link>
       </header>
 
       <div className="cart-container">
+        {/* Breadcrumb */}
         <div className="cart-breadcrumb">
           <Link href="/">Home</Link>
           <span>/</span>
           <span>Shopping Cart</span>
         </div>
 
+        {/* Cart Title */}
         <div className="cart-title-row">
           <div>
-            <span className="cart-eyebrow">YOUR SHOPPING BAG</span>
+            <span className="cart-eyebrow">
+              YOUR SHOPPING BAG
+            </span>
+
             <h1>Shopping Cart</h1>
+
             <p>
-              {cart.reduce((sum, item) => sum + item.quantity, 0)}টি পণ্য
-              তোমার কার্টে আছে।
+              {cart.reduce(
+                (sum, item) => sum + item.quantity,
+                0
+              )}{" "}
+              items in your cart.
             </p>
           </div>
         </div>
 
+        {/* Empty Cart */}
         {cart.length === 0 ? (
           <section className="cart-empty">
             <div className="empty-cart-icon">🛒</div>
-            <h2>তোমার কার্ট খালি</h2>
+
+            <h2>Your Cart is Empty</h2>
+
             <p>
-              পছন্দের গ্যাজেট খুঁজে বের করো এবং কেনাকাটা শুরু করো।
+              Discover your favourite gadgets and start shopping.
             </p>
+
             <Link href="/" className="cart-primary-button">
-              পণ্য দেখো →
+              Explore Products →
             </Link>
           </section>
         ) : (
           <div className="cart-layout">
+            {/* Cart Items */}
             <section className="cart-items-panel">
               <div className="cart-panel-heading">
-                <h2>তোমার পণ্য</h2>
-                <span>{cart.length}টি আইটেম</span>
+                <h2>Your Items</h2>
+                <span>{cart.length} items</span>
               </div>
 
               {cart.map((item) => (
@@ -338,14 +393,30 @@ async function submitOrder(event: React.FormEvent<HTMLFormElement>) {
                     className="cart-product-image"
                     style={{ backgroundColor: item.color }}
                   >
-                    <span>{item.emoji}</span>
+                    {item.image ? (
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        className="cart-product-photo"
+                        onError={() =>
+                          console.log(
+                            "Cart image failed:",
+                            item.image
+                          )
+                        }
+                      />
+                    ) : (
+                      <span>{item.emoji}</span>
+                    )}
                   </div>
 
                   <div className="cart-product-details">
                     <span className="cart-product-category">
                       {item.category}
                     </span>
+
                     <h3>{item.name}</h3>
+
                     <strong className="cart-unit-price">
                       {money(item.price)}
                     </strong>
@@ -365,14 +436,20 @@ async function submitOrder(event: React.FormEvent<HTMLFormElement>) {
 
                     <div className="quantity-control">
                       <button
-                        onClick={() => changeQuantity(item.id, -1)}
+                        onClick={() =>
+                          changeQuantity(item.id, -1)
+                        }
                         aria-label={`Decrease ${item.name} quantity`}
                       >
                         −
                       </button>
+
                       <span>{item.quantity}</span>
+
                       <button
-                        onClick={() => changeQuantity(item.id, 1)}
+                        onClick={() =>
+                          changeQuantity(item.id, 1)
+                        }
                         aria-label={`Increase ${item.name} quantity`}
                       >
                         +
@@ -383,63 +460,82 @@ async function submitOrder(event: React.FormEvent<HTMLFormElement>) {
               ))}
 
               <Link href="/" className="back-shopping">
-                ← আরও পণ্য যোগ করো
+                ← Continue Shopping
               </Link>
             </section>
 
+            {/* Order Summary */}
             <aside className="cart-summary-panel">
               <h2>Order Summary</h2>
 
               <div className="summary-line">
-                <span>পণ্যের মূল্য</span>
+                <span>Subtotal</span>
                 <strong>{money(subtotal)}</strong>
               </div>
 
               <div className="summary-line">
-                <span>ডেলিভারি চার্জ</span>
+                <span>Delivery Fee</span>
+
                 <strong>
-                  {deliveryCharge === 0 ? "FREE" : money(deliveryCharge)}
+                  {deliveryCharge === 0
+                    ? "FREE"
+                    : money(deliveryCharge)}
                 </strong>
               </div>
 
               <div className="free-delivery-note">
-                {subtotal >= 3000
-                  ? "✓ তুমি ফ্রি ডেলিভারি পাচ্ছ!"
-                  : `আর ${money(3000 - subtotal)} টাকার পণ্য নিলে ডেলিভারি ফ্রি।`}
+                {settingsLoading
+                  ? "Loading delivery fee..."
+                  : subtotal >= storeSettings.freeDeliveryMinimum
+                    ? "✓ Congratulations! You qualify for free delivery!"
+                    : `Add ${money(
+                        storeSettings.freeDeliveryMinimum - subtotal
+                      )} more to your cart to get free delivery.`}
               </div>
 
               <div className="summary-total">
-                <span>সর্বমোট</span>
+                <span>Total</span>
                 <strong>{money(total)}</strong>
               </div>
 
               <button
                 className="cart-primary-button checkout-button"
+                disabled={settingsLoading}
                 onClick={() => {
                   setCheckoutOpen(true);
                   setError("");
                 }}
               >
-                Checkout-এ যাও →
+                {settingsLoading
+                  ? "Loading Settings..."
+                  : "Proceed to Checkout →"}
               </button>
 
               <div className="payment-note">
                 <span>🔒</span>
+
                 <p>
-                  তোমার তথ্য শুধু এই পরীক্ষামূলক ব্রাউজার অ্যাপেই সংরক্ষিত
-                  হবে।
+                  Your order details will be securely saved.
+                  Payment is available via Cash on Delivery.
                 </p>
               </div>
             </aside>
           </div>
         )}
 
+        {/* Checkout Form */}
         {checkoutOpen && cart.length > 0 && (
           <section className="checkout-panel" id="checkout">
             <div className="checkout-heading">
-              <span className="cart-eyebrow">ALMOST THERE</span>
-              <h2>ডেলিভারি তথ্য</h2>
-              <p>পণ্য পাঠানোর জন্য নিচের তথ্যগুলো পূরণ করো।</p>
+              <span className="cart-eyebrow">
+                ALMOST THERE
+              </span>
+
+              <h2>Delivery Information</h2>
+
+              <p>
+                Please enter your details to complete your order.
+              </p>
             </div>
 
             {error && (
@@ -451,13 +547,14 @@ async function submitOrder(event: React.FormEvent<HTMLFormElement>) {
             <form onSubmit={submitOrder}>
               <div className="checkout-fields">
                 <label>
-                  তোমার নাম *
+                  Full Name *
+
                   <input
                     value={customer.name}
                     onChange={(event) =>
                       updateCustomer("name", event.target.value)
                     }
-                    placeholder="সম্পূর্ণ নাম"
+                    placeholder="Enter your full name"
                     autoComplete="name"
                     required
                     minLength={2}
@@ -465,7 +562,8 @@ async function submitOrder(event: React.FormEvent<HTMLFormElement>) {
                 </label>
 
                 <label>
-                  মোবাইল নম্বর *
+                  Mobile Number *
+
                   <input
                     type="tel"
                     value={customer.phone}
@@ -483,26 +581,34 @@ async function submitOrder(event: React.FormEvent<HTMLFormElement>) {
                 </label>
 
                 <label>
-                  জেলা *
+                  District *
+
                   <input
                     value={customer.district}
                     onChange={(event) =>
-                      updateCustomer("district", event.target.value)
+                      updateCustomer(
+                        "district",
+                        event.target.value
+                      )
                     }
-                    placeholder="যেমন: Dhaka"
+                    placeholder="e.g. Dhaka"
                     autoComplete="address-level2"
                     required
                   />
                 </label>
 
                 <label className="address-field">
-                  সম্পূর্ণ ডেলিভারি ঠিকানা *
+                  Full Delivery Address *
+
                   <textarea
                     value={customer.address}
                     onChange={(event) =>
-                      updateCustomer("address", event.target.value)
+                      updateCustomer(
+                        "address",
+                        event.target.value
+                      )
                     }
-                    placeholder="বাড়ি/ফ্ল্যাট, রোড, এলাকা, থানা এবং পোস্ট কোড"
+                    placeholder="House/Flat, Road, Area, City and Postal Code"
                     autoComplete="street-address"
                     rows={3}
                     required
@@ -511,20 +617,25 @@ async function submitOrder(event: React.FormEvent<HTMLFormElement>) {
                 </label>
               </div>
 
+              {/* Payment Method */}
               <div className="payment-method-card">
                 <span className="cod-icon">৳</span>
+
                 <div>
                   <strong>Cash on Delivery (COD)</strong>
-                  <p>পণ্য হাতে পেয়ে টাকা পরিশোধ করবে।</p>
+                  <p>Pay when your order is delivered.</p>
                 </div>
+
                 <span className="selected-payment">✓</span>
               </div>
 
+              {/* Checkout Total */}
               <div className="checkout-total">
-                <span>অর্ডারের মোট মূল্য</span>
+                <span>Order Total</span>
                 <strong>{money(total)}</strong>
               </div>
 
+              {/* Checkout Actions */}
               <div className="checkout-actions">
                 <button
                   type="button"
@@ -534,25 +645,27 @@ async function submitOrder(event: React.FormEvent<HTMLFormElement>) {
                     setError("");
                   }}
                 >
-                  ফিরে যাও
+                  Back
                 </button>
 
-                <button type="submit" className="cart-primary-button">
-                  অর্ডার নিশ্চিত করো →
+                <button
+                  type="submit"
+                  className="cart-primary-button"
+                  disabled={submitting || settingsLoading}
+                >
+                  {submitting
+                    ? "Placing Order..."
+                    : "Confirm Order →"}
                 </button>
               </div>
-
-              <p className="demo-warning">
-                পরীক্ষামূলক সংস্করণ: এই অর্ডার দোকানে পাঠানো হবে না। বাস্তব
-                অর্ডার গ্রহণের আগে সার্ভার ও ডেটাবেস সংযুক্ত করতে হবে।
-              </p>
             </form>
           </section>
         )}
       </div>
 
+      {/* Footer */}
       <footer className="cart-footer">
-        <span>© 2026 Gadget Store</span>
+        <span>© {new Date().getFullYear()} Gadget Store. All rights reserved.</span>
         <span>Made for tech lovers in Bangladesh 🇧🇩</span>
       </footer>
     </main>

@@ -1,8 +1,10 @@
-
 "use client";
+
+import "./login.css";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 
@@ -17,13 +19,20 @@ export default function AdminLoginPage() {
 
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
     setError("");
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
+
       router.push("/admin/orders");
-    } catch {
+    } catch (error) {
+      console.error("Admin login failed:", error);
       setError("Login failed. Please check your email and password.");
     } finally {
       setLoading(false);
@@ -38,9 +47,14 @@ export default function AdminLoginPage() {
         <h1>Admin Login</h1>
         <p>Sign in to manage your Gadget Store.</p>
 
-        {error && <div className="admin-login-error">{error}</div>}
+        {error && (
+          <div className="admin-login-error" role="alert">
+            {error}
+          </div>
+        )}
 
         <label htmlFor="email">Email Address</label>
+
         <input
           id="email"
           type="email"
@@ -49,9 +63,11 @@ export default function AdminLoginPage() {
           onChange={(e) => setEmail(e.target.value)}
           autoComplete="username"
           required
+          disabled={loading}
         />
 
         <label htmlFor="password">Password</label>
+
         <div className="admin-login-password">
           <input
             id="password"
@@ -61,11 +77,14 @@ export default function AdminLoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
             required
+            disabled={loading}
           />
 
           <button
             type="button"
-            onClick={() => setShowPassword(!showPassword)}
+            onClick={() => setShowPassword((previous) => !previous)}
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            disabled={loading}
           >
             {showPassword ? "Hide" : "Show"}
           </button>
@@ -79,11 +98,10 @@ export default function AdminLoginPage() {
           {loading ? "Signing in..." : "Sign In"}
         </button>
 
-        <a href="/" className="admin-login-back">
+        <Link href="/" className="admin-login-back">
           ← Back to Store
-        </a>
+        </Link>
       </form>
     </main>
   );
 }
-

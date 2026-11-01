@@ -48,3 +48,21 @@ firebase-debug.*.log
 # Ignore the nested duplicate project
 /gadget-store/
 /functions/node_modules/
+# Local backup files
+*.backup
+*.backup2
+*-backup.css
+*-before-*.css
+
+# Local test files
+/app/test-notification/
+/functions/test-notification.js
+/test-firebase-admin.cjs
+
+# Local build output
+/build-output/
+
+# Inventory backup files
+*.inventory-backup*
+
+*.stock-backup
