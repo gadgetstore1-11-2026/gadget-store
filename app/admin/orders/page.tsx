@@ -595,6 +595,10 @@ console.log("FCM Registration Token:", token);
   <span>▣</span>
   Products
 </Link>
+          <Link href="/admin/inventory" className="gs-sidebar-link">
+            <span>▦</span>
+            Inventory
+          </Link>
 <Link href="/admin/categories" className="gs-sidebar-link">
   <span>▦</span>
   Categories
