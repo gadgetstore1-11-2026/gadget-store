@@ -72,6 +72,8 @@ export default function AdminOrdersPage() {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [revenueStartDate, setRevenueStartDate] = useState("");
+  const [revenueEndDate, setRevenueEndDate] = useState("");
 
   const [newOrderCount, setNewOrderCount] = useState(0);
   const [soundEnabled, setSoundEnabled] = useState(false);
@@ -466,6 +468,18 @@ console.log("FCM Registration Token:", token);
 
   const today = new Date();
 
+  const dateFilteredRevenue = deliveredOrders.filter((order) => {
+    const date = new Date(order.createdAt);
+    const afterStart = !revenueStartDate || date >= new Date(revenueStartDate + "T00:00:00");
+    const beforeEnd = !revenueEndDate || date <= new Date(revenueEndDate + "T23:59:59.999");
+    return afterStart && beforeEnd;
+  });
+
+  const selectedPeriodRevenue = dateFilteredRevenue.reduce(
+    (sum, order) => sum + order.total,
+    0
+  );
+
   const totalRevenue = deliveredOrders.reduce(
     (sum, order) => sum + order.total,
     0
@@ -503,6 +517,45 @@ console.log("FCM Registration Token:", token);
     };
   });
 
+  const dailySales = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setHours(0, 0, 0, 0);
+    date.setDate(today.getDate() - (6 - index));
+
+    const revenue = deliveredOrders
+      .filter((order) => {
+        const orderDate = new Date(order.createdAt);
+        return orderDate.toDateString() === date.toDateString();
+      })
+      .reduce((sum, order) => sum + order.total, 0);
+
+    return {
+      label: date.toLocaleDateString("en-US", { weekday: "short" }),
+      revenue,
+    };
+  });
+
+  const weeklySales = Array.from({ length: 8 }, (_, index) => {
+    const endDate = new Date(today);
+    endDate.setHours(23, 59, 59, 999);
+    endDate.setDate(today.getDate() - (7 - index) * 7);
+
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - 6);
+    startDate.setHours(0, 0, 0, 0);
+
+    const revenue = deliveredOrders
+      .filter((order) => {
+        const date = new Date(order.createdAt);
+        return date >= startDate && date <= endDate;
+      })
+      .reduce((sum, order) => sum + order.total, 0);
+
+    return {
+      label: `W${index + 1}`,
+      revenue,
+    };
+  });
   const productSales = new Map<
     string,
     { name: string; quantity: number; revenue: number }
@@ -749,6 +802,32 @@ console.log("FCM Registration Token:", token);
             </div>
 
             <div style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "end",
+              gap: "12px",
+              marginBottom: "22px",
+              padding: "16px",
+              background: "#f8f7ff",
+              borderRadius: "12px",
+            }}>
+              <label style={{ display: "grid", gap: "6px", fontSize: "13px", color: "#555" }}>
+                From
+                <input type="date" value={revenueStartDate} onChange={(event) => setRevenueStartDate(event.target.value)} style={{ padding: "10px", border: "1px solid #ddd", borderRadius: "8px" }} />
+              </label>
+              <label style={{ display: "grid", gap: "6px", fontSize: "13px", color: "#555" }}>
+                To
+                <input type="date" value={revenueEndDate} min={revenueStartDate || undefined} onChange={(event) => setRevenueEndDate(event.target.value)} style={{ padding: "10px", border: "1px solid #ddd", borderRadius: "8px" }} />
+              </label>
+              <button type="button" onClick={() => { setRevenueStartDate(""); setRevenueEndDate(""); }} style={{ padding: "10px 16px", border: "1px solid #7047eb", borderRadius: "8px", background: "#fff", color: "#7047eb", cursor: "pointer" }}>
+                Reset Dates
+              </button>
+              <div style={{ marginLeft: "auto" }}>
+                <small style={{ color: "#777" }}>Selected Period Revenue</small>
+                <h3 style={{ color: "#7047eb", fontSize: "22px", fontWeight: 800 }}>{money(selectedPeriodRevenue)}</h3>
+                <small style={{ color: "#888" }}>{dateFilteredRevenue.length} delivered orders</small>
+              </div>
+            </div>            <div style={{
               display: "grid",
               gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
               gap: "16px",
@@ -957,6 +1036,97 @@ console.log("FCM Registration Token:", token);
                   </div>
                 )}
               </div>
+            </div>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: "20px",
+              marginTop: "24px",
+            }}>
+              {[
+                { title: "Daily Revenue", subtitle: "Last 7 days", data: dailySales },
+                { title: "Weekly Revenue", subtitle: "Last 8 weeks", data: weeklySales },
+              ].map((chart) => {
+                const maxRevenue = Math.max(
+                  ...chart.data.map((item) => item.revenue),
+                  1
+                );
+
+                return (
+                  <div key={chart.title} style={{
+                    padding: "22px",
+                    border: "1px solid #eee",
+                    borderRadius: "14px",
+                    background: "#fff",
+                  }}>
+                    <h3 style={{ fontSize: "17px", fontWeight: 800 }}>
+                      {chart.title}
+                    </h3>
+                    <p style={{ color: "#888", fontSize: "13px", marginTop: "4px" }}>
+                      {chart.subtitle} · Delivered orders only
+                    </p>
+
+                    <div style={{
+                      display: "flex",
+                      alignItems: "flex-end",
+                      justifyContent: "space-around",
+                      gap: "8px",
+                      height: "190px",
+                      marginTop: "20px",
+                      borderBottom: "1px solid #eee",
+                    }}>
+                      {chart.data.map((item) => {
+                        const height = item.revenue > 0
+                          ? Math.max((item.revenue / maxRevenue) * 125, 8)
+                          : 4;
+
+                        return (
+                          <div key={item.label} style={{
+                            flex: 1,
+                            height: "100%",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            gap: "7px",
+                            minWidth: 0,
+                          }}>
+                            <span
+                              title={money(item.revenue)}
+                              style={{
+                                fontSize: "10px",
+                                color: "#777",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {item.revenue > 0 ? money(item.revenue) : "৳0"}
+                            </span>
+                            <div
+                              title={`${item.label}: ${money(item.revenue)}`}
+                              style={{
+                                width: "65%",
+                                maxWidth: "38px",
+                                height: `${height}px`,
+                                minHeight: "4px",
+                                background: "linear-gradient(180deg, #9675ff, #7047eb)",
+                                borderRadius: "7px 7px 0 0",
+                                transition: "height .3s ease",
+                              }}
+                            />
+                            <span style={{
+                              fontSize: "11px",
+                              color: "#666",
+                              paddingBottom: "7px",
+                            }}>
+                              {item.label}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
           {/* Sales Summary */}
