@@ -1252,3 +1252,6 @@
 
 /* END PROFESSIONAL ADMIN DASHBOARD ENHANCEMENTS */
 
+
+/* Shared Admin Layout */
+.gs-admin-main > .gs-admin > .gs-sidebar { display: none; }

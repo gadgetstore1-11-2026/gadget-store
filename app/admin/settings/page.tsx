@@ -8,24 +8,45 @@ import { auth, db } from "@/lib/firebase";
 
 const ADMIN_UID = "MiCPapmVpcggbMozz8eV45jI7pX2";
 
+type Division =
+  | "Dhaka"
+  | "Chattogram"
+  | "Rajshahi"
+  | "Khulna"
+  | "Barishal"
+  | "Sylhet"
+  | "Rangpur"
+  | "Mymensingh";
+
 type StoreSettings = {
-storeName: string;
-logoUrl: string;
-phone: string;
-whatsapp: string;
-address: string;
-deliveryCharge: number;
-freeDeliveryMinimum: number;
+  storeName: string;
+  logoUrl: string;
+  phone: string;
+  whatsapp: string;
+  address: string;
+  deliveryCharge: number;
+  divisionDeliveryCharges: Record<Division, number>;
+  freeDeliveryMinimum: number;
 };
 
 const defaultSettings: StoreSettings = {
-storeName: "Gadget Store",
-logoUrl: "",
-phone: "",
-whatsapp: "",
-address: "",
-deliveryCharge: 80,
-freeDeliveryMinimum: 3000,
+  storeName: "Gadget Store",
+  logoUrl: "",
+  phone: "",
+  whatsapp: "",
+  address: "",
+  deliveryCharge: 80,
+  divisionDeliveryCharges: {
+    Dhaka: 0,
+    Chattogram: 0,
+    Rajshahi: 0,
+    Khulna: 0,
+    Barishal: 0,
+    Sylhet: 0,
+    Rangpur: 0,
+    Mymensingh: 0,
+  },
+  freeDeliveryMinimum: 3000,
 };
 
 export default function AdminSettingsPage() {
@@ -47,7 +68,7 @@ return;
 }
 
   if (user.uid !== ADMIN_UID) {
-    setError("আপনার এই পেজ দেখার অনুমতি নেই।");
+    setError("You do not have permission to access this page.");
     setLoading(false);
     return;
   }
@@ -64,7 +85,7 @@ return;
     }
   } catch (err) {
     console.error(err);
-    setError("Settings লোড করা যায়নি।");
+    setError("Unable to load settings.");
   } finally {
     setLoading(false);
   }
@@ -104,10 +125,10 @@ try {
     updatedAt: new Date().toISOString(),
   });
 
-  setMessage("Settings সফলভাবে সংরক্ষণ হয়েছে!");
+  setMessage("Settings saved successfully!");
 } catch (err) {
   console.error(err);
-  setError("Settings সংরক্ষণ করা যায়নি। আবার চেষ্টা করো।");
+  setError("Unable to save settings. Please try again.");
 } finally {
   setSaving(false);
 }
@@ -137,7 +158,7 @@ color: "#334155",
 if (loading) {
 return (
 <div style={{ padding: 40, textAlign: "center" }}>
-Settings লোড হচ্ছে... </div>
+Loading settings... </div>
 );
 }
 
@@ -170,7 +191,7 @@ Admin Panel / Settings </p>
         </h1>
 
         <p style={{ color: "#64748b", fontSize: 14 }}>
-          তোমার অনলাইন স্টোরের প্রয়োজনীয় তথ্য পরিবর্তন করো।
+          Manage your online store information and preferences.
         </p>
       </div>
 
@@ -245,14 +266,11 @@ Admin Panel / Settings </p>
             <input
               style={inputStyle}
               value={settings.storeName}
-              onChange={(e) =>
-                handleChange("storeName", e.target.value)
-              }
-              placeholder="Gadget Store"
+              onChange={(e) => handleChange("storeName", e.target.value)}
+              placeholder="Enter your store name"
               required
             />
           </div>
-
           <div>
             <label style={labelStyle}>Store Logo URL</label>
             <input
@@ -409,6 +427,58 @@ Admin Panel / Settings </p>
           </div>
         </div>
 
+        <h3 style={{ fontSize: 16, marginTop: 22 }}>
+          Division-wise Delivery Charges
+        </h3>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 18,
+            marginBottom: 18,
+          }}
+        >
+          {(
+            [
+              "Dhaka",
+              "Chattogram",
+              "Rajshahi",
+              "Khulna",
+              "Barishal",
+              "Sylhet",
+              "Rangpur",
+              "Mymensingh",
+            ] as Division[]
+          ).map((division) => (
+            <div key={division}>
+              <label style={labelStyle}>
+                {division} Delivery Charge (৳)
+              </label>
+              <input
+                type="number"
+                min="0"
+                style={inputStyle}
+                value={settings.divisionDeliveryCharges[division] ?? 0}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+
+                  setSettings((previous) => ({
+                    ...previous,
+                    divisionDeliveryCharges: {
+                      ...previous.divisionDeliveryCharges,
+                      [division]: value,
+                    },
+                  }));
+
+                  setMessage("");
+                  setError("");
+                }}
+                required
+              />
+            </div>
+          ))}
+        </div>
         <div
           style={{
             marginTop: 18,
@@ -419,9 +489,9 @@ Admin Panel / Settings </p>
             fontSize: 13,
           }}
         >
-          উদাহরণ: ৳{settings.freeDeliveryMinimum} বা তার বেশি
-          অর্ডারে Free Delivery এবং এর নিচে ৳
-          {settings.deliveryCharge} Delivery Charge।
+          Example: ৳{settings.freeDeliveryMinimum} or more
+           orders qualify for free delivery. Orders below this amount have a delivery charge of ৳
+          {settings.deliveryCharge}  delivery charge.
         </div>
       </section>
 

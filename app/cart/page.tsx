@@ -7,38 +7,58 @@ import { db } from "@/lib/firebase";
 import { createOrder } from "@/lib/orders";
 
 type CartItem = {
-  id: string | number;
+  id: string;
   name: string;
   category: string;
   price: number;
   quantity: number;
   emoji: string;
   color: string;
-  image?: string;
+  image: string;
 };
+type Division =
+  | "Dhaka"
+  | "Chattogram"
+  | "Rajshahi"
+  | "Khulna"
+  | "Barishal"
+  | "Sylhet"
+  | "Rangpur"
+  | "Mymensingh";
 
 type Customer = {
   name: string;
   phone: string;
+  division: Division | "";
   district: string;
   address: string;
 };
 
 type StoreSettings = {
-  deliveryCharge: number;
+  divisionDeliveryCharges: Record<Division, number>;
   freeDeliveryMinimum: number;
 };
 
 const STORAGE_KEY = "gadget-store-cart";
 
 const DEFAULT_SETTINGS: StoreSettings = {
-  deliveryCharge: 80,
+  divisionDeliveryCharges: {
+    Dhaka: 0,
+    Chattogram: 0,
+    Rajshahi: 0,
+    Khulna: 0,
+    Barishal: 0,
+    Sylhet: 0,
+    Rangpur: 0,
+    Mymensingh: 0,
+  },
   freeDeliveryMinimum: 3000,
 };
 
 const emptyCustomer: Customer = {
   name: "",
   phone: "",
+  division: "",
   district: "",
   address: "",
 };
@@ -57,6 +77,12 @@ export default function CartPage() {
     useState<StoreSettings>(DEFAULT_SETTINGS);
 
   const [settingsLoading, setSettingsLoading] = useState(true);
+
+  // Reward points
+  const [availablePoints, setAvailablePoints] = useState(0);
+  const [redeemPoints, setRedeemPoints] = useState(0);
+  const [pointsLoading, setPointsLoading] = useState(false);
+  const [pointsChecked, setPointsChecked] = useState(false);
 
   // Format currency
   const money = (amount: number) =>
@@ -89,40 +115,65 @@ export default function CartPage() {
   }, [cart, ready]);
 
   // Load store settings from Firebase
-  useEffect(() => {
-    async function loadStoreSettings() {
-      try {
-        const settingsRef = doc(db, "settings", "store");
-        const snapshot = await getDoc(settingsRef);
+useEffect(() => {
+async function loadStoreSettings() {
+try {
+const settingsRef = doc(db, "settings", "store");
+const snapshot = await getDoc(settingsRef);
 
-        if (snapshot.exists()) {
-          const data = snapshot.data();
 
-          setStoreSettings({
-            deliveryCharge:
-              typeof data.deliveryCharge === "number" &&
-              Number.isFinite(data.deliveryCharge) &&
-              data.deliveryCharge >= 0
-                ? data.deliveryCharge
-                : DEFAULT_SETTINGS.deliveryCharge,
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      const savedCharges = data.divisionDeliveryCharges || {};
 
-            freeDeliveryMinimum:
-              typeof data.freeDeliveryMinimum === "number" &&
-              Number.isFinite(data.freeDeliveryMinimum) &&
-              data.freeDeliveryMinimum >= 0
-                ? data.freeDeliveryMinimum
-                : DEFAULT_SETTINGS.freeDeliveryMinimum,
-          });
+      const divisions: Division[] = [
+        "Dhaka",
+        "Chattogram",
+        "Rajshahi",
+        "Khulna",
+        "Barishal",
+        "Sylhet",
+        "Rangpur",
+        "Mymensingh",
+      ];
+
+      const divisionDeliveryCharges = {
+        ...DEFAULT_SETTINGS.divisionDeliveryCharges,
+      };
+
+      divisions.forEach((division) => {
+        const charge = savedCharges[division];
+
+        if (
+          typeof charge === "number" &&
+          Number.isFinite(charge) &&
+          charge >= 0
+        ) {
+          divisionDeliveryCharges[division] = charge;
         }
-      } catch (err) {
-        console.error("Store settings loading failed:", err);
-      } finally {
-        setSettingsLoading(false);
-      }
-    }
+      });
 
-    loadStoreSettings();
-  }, []);
+      setStoreSettings({
+        divisionDeliveryCharges,
+        freeDeliveryMinimum:
+          typeof data.freeDeliveryMinimum === "number" &&
+          Number.isFinite(data.freeDeliveryMinimum) &&
+          data.freeDeliveryMinimum >= 0
+            ? data.freeDeliveryMinimum
+            : DEFAULT_SETTINGS.freeDeliveryMinimum,
+      });
+    }
+  } catch (err) {
+    console.error("Store settings loading failed:", err);
+  } finally {
+    setSettingsLoading(false);
+  }
+}
+
+loadStoreSettings();
+
+
+}, []);
 
   // Calculate subtotal
   const subtotal = useMemo(
@@ -135,14 +186,85 @@ export default function CartPage() {
   );
 
   // Calculate delivery fee
-  const deliveryCharge =
-    subtotal === 0
-      ? 0
-      : subtotal >= storeSettings.freeDeliveryMinimum
-        ? 0
-        : storeSettings.deliveryCharge;
+const selectedDeliveryCharge = customer.division
+  ? storeSettings.divisionDeliveryCharges[customer.division]
+  : 0;
 
-  const total = subtotal + deliveryCharge;
+const deliveryCharge =
+  subtotal === 0
+    ? 0
+    : subtotal >= storeSettings.freeDeliveryMinimum
+      ? 0
+      : selectedDeliveryCharge;
+
+const total = subtotal + deliveryCharge;
+
+  // Calculate reward discount
+  const maxRedeemablePoints = Math.min(
+    Math.floor(availablePoints / 100) * 100,
+    Math.floor(subtotal / 50) * 100
+  );
+
+  const rewardDiscount = (redeemPoints / 100) * 50;
+  const finalTotal = total - rewardDiscount;
+
+  // Look up reward points using the customer's mobile number
+  useEffect(() => {
+    const phone = customer.phone.trim();
+
+    setAvailablePoints(0);
+    setRedeemPoints(0);
+    setPointsChecked(false);
+
+    if (!/^01[3-9]\d{8}$/.test(phone)) {
+      setPointsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const timer = setTimeout(async () => {
+      setPointsLoading(true);
+
+      try {
+        const response = await fetch("/api/rewards/lookup", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ phone }),
+          signal: controller.signal,
+        });
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || "Points lookup failed.");
+        }
+
+        setAvailablePoints(
+          Math.max(0, Math.floor(Number(result.availablePoints) || 0))
+        );
+
+        setPointsChecked(true);
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          console.error("Reward points lookup failed:", err);
+          setAvailablePoints(0);
+          setPointsChecked(false);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setPointsLoading(false);
+        }
+      }
+    }, 500);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [customer.phone]);
 
   // Change product quantity
   function changeQuantity(id: string | number, change: number) {
@@ -197,6 +319,11 @@ export default function CartPage() {
       return;
     }
 
+    if (!customer.division) {
+      setError("Please select your division.");
+      return;
+    }
+
     if (customer.name.trim().length < 2) {
       setError("Please enter your full name.");
       return;
@@ -219,6 +346,7 @@ export default function CartPage() {
         customer: {
           name: customer.name.trim(),
           phone: customer.phone.trim(),
+          division: customer.division,
           district: customer.district.trim(),
           address: customer.address.trim(),
         },
@@ -581,21 +709,46 @@ export default function CartPage() {
                 </label>
 
                 <label>
-                  District *
+  Division *
 
-                  <input
-                    value={customer.district}
-                    onChange={(event) =>
-                      updateCustomer(
-                        "district",
-                        event.target.value
-                      )
-                    }
-                    placeholder="e.g. Dhaka"
-                    autoComplete="address-level2"
-                    required
-                  />
-                </label>
+  <select
+    value={customer.division}
+    onChange={(event) =>
+      updateCustomer(
+        "division",
+        event.target.value as Division
+      )
+    }
+    required
+  >
+    <option value="">Select your division</option>
+    <option value="Dhaka">Dhaka</option>
+    <option value="Chattogram">Chattogram</option>
+    <option value="Rajshahi">Rajshahi</option>
+    <option value="Khulna">Khulna</option>
+    <option value="Barishal">Barishal</option>
+    <option value="Sylhet">Sylhet</option>
+    <option value="Rangpur">Rangpur</option>
+    <option value="Mymensingh">Mymensingh</option>
+  </select>
+</label>
+
+<label>
+  District *
+
+  <input
+    value={customer.district}
+    onChange={(event) =>
+      updateCustomer(
+        "district",
+        event.target.value
+      )
+    }
+    placeholder="e.g. Dhaka"
+    autoComplete="address-level2"
+    required
+  />
+</label>
 
                 <label className="address-field">
                   Full Delivery Address *

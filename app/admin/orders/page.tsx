@@ -54,6 +54,8 @@ type Order = {
   status?: OrderStatus;
 };
 
+const ADMIN_UID = "MiCPapmVpcggbMozz8eV45jI7pX2";
+
 const statuses: OrderStatus[] = [
   "Pending",
   "Confirmed",
@@ -277,6 +279,18 @@ console.log("FCM Registration Token:", token);
           return;
         }
 
+        if (user.uid !== ADMIN_UID) {
+          setIsAuthenticated(false);
+          setAuthChecked(true);
+          setReady(false);
+
+          void signOut(auth).finally(() => {
+            window.location.replace("/admin/orders/login");
+          });
+
+          return;
+        }
+
         setIsAuthenticated(true);
         setAuthChecked(true);
 
@@ -459,8 +473,60 @@ console.log("FCM Registration Token:", token);
   const totalSales = orders
     .filter((order) => order.status !== "Cancelled")
     .reduce((sum, order) => sum + order.total, 0);
+  // Customer Analytics
 
-  // Sales Analytics
+  const customerMap = new Map<
+    string,
+    {
+      name: string;
+      phone: string;
+      orderCount: number;
+      totalSpent: number;
+    }
+  >();
+
+  orders
+    .filter((order) => order.status !== "Cancelled")
+    .forEach((order) => {
+      const digits = order.customer.phone.replace(/\D/g, "");
+      const phoneKey = digits.startsWith("880")
+        ? digits.slice(3)
+        : digits;
+
+      if (!phoneKey) return;
+
+      const existing = customerMap.get(phoneKey);
+
+      if (existing) {
+        existing.orderCount += 1;
+        existing.totalSpent += order.total;
+      } else {
+        customerMap.set(phoneKey, {
+          name: order.customer.name,
+          phone: order.customer.phone,
+          orderCount: 1,
+          totalSpent: order.total,
+        });
+      }
+    });
+
+  const customerAnalytics = Array.from(customerMap.values());
+
+  const repeatCustomerCount = customerAnalytics.filter(
+    (customer) => customer.orderCount > 1
+  ).length;
+
+    const topCustomers = [...customerAnalytics]
+    .sort((a, b) => b.totalSpent - a.totalSpent)
+    .slice(0, 5);
+
+  const vipCustomers = customerAnalytics.filter(
+    (customer) =>
+      customer.totalSpent >= 10000 ||
+      customer.orderCount >= 3
+  );
+
+  const vipCustomerCount = vipCustomers.length;  // Sales Analytics
 
   const deliveredOrders = orders.filter(
     (order) => order.status === "Delivered"
@@ -662,9 +728,9 @@ console.log("FCM Registration Token:", token);
   Customers
 </Link>
 
-<Link href="/admin/settings" className="admin-nav-link">
+<Link href="/admin/settings" className="gs-sidebar-link">
 <span>⚙️</span>
-  <span>Settings</span>
+  Settings
 </Link>
 
           <Link href="/" className="gs-sidebar-link">
@@ -781,6 +847,242 @@ console.log("FCM Registration Token:", token);
               <small>Successfully delivered</small>
             </article>
           </div>
+
+          {/* Customer Analytics */}
+          <section
+            style={{
+              marginTop: "28px",
+              marginBottom: "28px",
+              background: "#ffffff",
+              padding: "24px",
+              borderRadius: "18px",
+              border: "1px solid #eee",
+            }}
+          >
+            <div style={{ marginBottom: "22px" }}>
+              <span className="gs-eyebrow">CUSTOMER INSIGHTS</span>
+              <h2
+                style={{
+                  fontSize: "24px",
+                  fontWeight: 800,
+                  marginTop: "6px",
+                }}
+              >
+                Customer Analytics
+              </h2>
+              <p style={{ color: "#777", marginTop: "5px" }}>
+                Understand your customer activity and identify your best customers.
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                gap: "16px",
+                marginBottom: "24px",
+              }}
+            >
+              <article
+                style={{
+                  padding: "22px",
+                  borderRadius: "14px",
+                  background: "#f5f3ff",
+                  border: "1px solid #e9e2ff",
+                }}
+              >
+                <span style={{ color: "#7047eb", fontSize: "14px" }}>
+                  Total Customers
+                </span>
+                <h3
+                  style={{
+                    fontSize: "30px",
+                    fontWeight: 800,
+                    marginTop: "10px",
+                    color: "#17152b",
+                  }}
+                >
+                  {customerAnalytics.length}
+                </h3>
+                <small style={{ color: "#888" }}>
+                  Customers with active orders
+                </small>
+              </article>
+
+              <article
+                style={{
+                  padding: "22px",
+                  borderRadius: "14px",
+                  background: "#ecfdf5",
+                  border: "1px solid #d1fae5",
+                }}
+              >
+                <span style={{ color: "#15803d", fontSize: "14px" }}>
+                  Repeat Customers
+                </span>
+                <h3
+                  style={{
+                    fontSize: "30px",
+                    fontWeight: 800,
+                    marginTop: "10px",
+                    color: "#166534",
+                  }}
+                >
+                  {repeatCustomerCount}
+                </h3>
+                <small style={{ color: "#888" }}>
+                  Customers with multiple orders
+                </small>
+              </article>
+            </div>
+
+              <article
+                style={{
+                  padding: "22px",
+                  borderRadius: "14px",
+                  background: "#fffbeb",
+                  border: "1px solid #fde68a",
+                }}
+              >
+                <span style={{ color: "#b45309", fontSize: "14px" }}>
+                  VIP Customers ⭐
+                </span>
+                <h3
+                  style={{
+                    fontSize: "30px",
+                    fontWeight: 800,
+                    marginTop: "10px",
+                    color: "#92400e",
+                  }}
+                >
+                  {vipCustomerCount}
+                </h3>
+                <small style={{ color: "#888" }}>
+                  Premium and loyal customers
+                </small>
+              </article>
+
+            <div
+              style={{
+                padding: "22px",
+                border: "1px solid #eee",
+                borderRadius: "14px",
+              }}
+            >
+              <h3 style={{ fontSize: "18px", fontWeight: 800 }}>
+                🏆 Top 5 Customers
+              </h3>
+
+              <p
+                style={{
+                  color: "#888",
+                  fontSize: "13px",
+                  marginTop: "5px",
+                  marginBottom: "16px",
+                }}
+              >
+                Ranked by total spending on non-cancelled orders.
+              </p>
+
+              {topCustomers.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "35px 10px",
+                    color: "#999",
+                  }}
+                >
+                  <div style={{ fontSize: "35px" }}>👥</div>
+                  <p>No customer data available yet.</p>
+                </div>
+              ) : (
+                topCustomers.map((customer, index) => (
+                  <div
+                    key={customer.phone}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: "12px",
+                      padding: "16px 0",
+                      borderBottom:
+                        index === topCustomers.length - 1
+                          ? "none"
+                          : "1px solid #f0f0f0",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        minWidth: 0,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: "38px",
+                          height: "38px",
+                          flexShrink: 0,
+                          display: "grid",
+                          placeItems: "center",
+                          borderRadius: "12px",
+                          background: "#f1edff",
+                          color: "#7047eb",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {index + 1}
+                      </span>
+
+                      <div style={{ minWidth: 0 }}>
+                        <strong
+                          style={{
+                            display: "block",
+                            fontSize: "14px",
+                            color: "#17152b",
+                          }}
+                        >
+                          {customer.name}
+                        </strong>
+                        {(customer.totalSpent >= 10000 ||
+                          customer.orderCount >= 3) && (
+                          <span
+                            style={{
+                              display: "inline-block",
+                              marginLeft: "8px",
+                              padding: "3px 7px",
+                              borderRadius: "20px",
+                              background: "#fef3c7",
+                              color: "#92400e",
+                              fontSize: "10px",
+                              fontWeight: 800,
+                            }}
+                          >
+                            ⭐ VIP
+                          </span>
+                        )}
+
+                        <small style={{ color: "#888" }}>
+                          {customer.phone} · {customer.orderCount} orders
+                        </small>
+                      </div>
+                    </div>
+
+                    <strong
+                      style={{
+                        color: "#7047eb",
+                        fontSize: "14px",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {money(customer.totalSpent)}
+                    </strong>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
 
           {/* Sales Analytics Overview */}
           <section style={{
@@ -980,7 +1282,7 @@ console.log("FCM Registration Token:", token);
                 ) : (
                   <div style={{ marginTop: "16px" }}>
                     {bestSellingProducts.map((product, index) => (
-                      <div key={product.name} style={{
+                      <div key={`${product.name}-${index}`} style={{
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",

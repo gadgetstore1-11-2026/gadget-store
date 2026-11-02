@@ -66,3 +66,8 @@ firebase-debug.*.log
 *.inventory-backup*
 
 *.stock-backup
+
+# Local source backup files
+*.before-*
+*.delivery-backup
+*.backup.*

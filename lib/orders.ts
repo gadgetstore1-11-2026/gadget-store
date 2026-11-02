@@ -26,20 +26,34 @@ export type OrderItem = {
   imageUrl?: string;
 };
 
+export type Division =
+  | "Dhaka"
+  | "Chattogram"
+  | "Rajshahi"
+  | "Khulna"
+  | "Barishal"
+  | "Sylhet"
+  | "Rangpur"
+  | "Mymensingh";
+
 export type Customer = {
   name: string;
   phone: string;
+  division: Division;
   district: string;
   address: string;
 };
 
 export type Order = {
   id?: string;
+  customerId?: string;
   orderNumber: string;
   customer: Customer;
   items: OrderItem[];
   subtotal: number;
   deliveryCharge: number;
+  rewardPointsUsed?: number;
+  rewardDiscount?: number;
   total: number;
   paymentMethod: string;
   createdAt: string;
@@ -53,17 +67,50 @@ export type PlaceOrderResponse = {
   orderId: string;
   orderNumber: string;
   total: number;
+  rewardPointsUsed: number;
+  rewardDiscount: number;
 };
 
 // Create an order through the secure Next.js API
 export async function createOrder(
-  order: Pick<Order, "customer" | "items">
+  order: Pick<Order, "customer" | "items"> & {
+    redeemPoints?: number;
+  }
 ): Promise<PlaceOrderResponse> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  const user = auth.currentUser;
+
+  const customerEmailSuffix = "@accounts.gadgetstore.com";
+
+  if (
+    user?.email &&
+    user.email.endsWith(customerEmailSuffix)
+  ) {
+    const accountPhone = user.email.slice(
+      0,
+      -customerEmailSuffix.length
+    );
+
+    if (!/^01[3-9]\d{8}$/.test(accountPhone)) {
+      throw new Error("Invalid customer account.");
+    }
+
+    if (accountPhone !== order.customer.phone.trim()) {
+      throw new Error(
+        "Checkout phone number must match your customer account."
+      );
+    }
+
+    const token = await user.getIdToken();
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   const response = await fetch("/api/orders", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(order),
   });
 
@@ -77,7 +124,6 @@ export async function createOrder(
 
   return result as PlaceOrderResponse;
 }
-
 // Retrieve all orders
 export async function getOrders(): Promise<Order[]> {
   const ordersQuery = query(
@@ -157,10 +203,13 @@ export async function removeOrder(
   orderId: string
 ): Promise<void> {
   const user = auth.currentUser;
+
   if (!user) {
     throw new Error("Please log in as administrator.");
   }
+
   const token = await user.getIdToken();
+
   const response = await fetch(
     `/api/admin/orders/${encodeURIComponent(orderId)}`,
     {
@@ -170,7 +219,9 @@ export async function removeOrder(
       },
     }
   );
+
   const result = await response.json();
+
   if (!response.ok || !result.success) {
     throw new Error(result.error || "Could not delete order.");
   }
