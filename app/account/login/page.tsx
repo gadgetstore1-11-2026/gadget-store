@@ -1,33 +1,27 @@
 "use client";
 
-import { Suspense, useEffect, useState, type FormEvent } from "react";
+import { Suspense, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { useRouter, useSearchParams } from "next/navigation";
+import { browserLocalPersistence, setPersistence, signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { getCustomerAuthEmail, isValidBangladeshPhone } from "@/lib/customer-auth";
 
 function CustomerLoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const success = searchParams.get("registered") === "1"
+    ? "Your account has been created. Please log in."
+    : "";
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-  const params = new URLSearchParams(window.location.search);
-
-  if (params.get("registered") === "1") {
-    setSuccess("Your account has been created. Please log in.");
-  }
-}, []);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    setSuccess("");
 
     if (!isValidBangladeshPhone(phone)) {
       setError("Please enter a valid Bangladesh mobile number.");
@@ -45,6 +39,7 @@ function CustomerLoginForm() {
       const normalizedPhone = phone.replace(/\D/g, "");
       const email = getCustomerAuthEmail(normalizedPhone);
 
+      await setPersistence(auth, browserLocalPersistence);
       await signInWithEmailAndPassword(auth, email, password);
 
       router.push("/account");
@@ -117,7 +112,7 @@ function CustomerLoginForm() {
         </form>
 
         <p className="customer-login-footer">
-          Don't have an account?{" "}
+          Don&apos;t have an account?{" "}
           <Link href="/account/register">Create Account</Link>
         </p>
 

@@ -1,4 +1,5 @@
-"use client";
+﻿"use client";
+import Image from "next/image";
 
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
@@ -17,14 +18,17 @@ import { auth, db } from "@/lib/firebase";
 const ADMIN_UID = "MiCPapmVpcggbMozz8eV45jI7pX2";
 
 type Product = {
-id: string;
-name: string;
-category: string;
-price: number;
-oldPrice: number;
-description: string;
-imageUrl: string;
-stock: number;
+  id: string;
+  name: string;
+  category: string;
+  price: number;
+  oldPrice: number;
+  description: string;
+  imageUrl: string;
+  stock: number;
+  brand: string;
+  images: string[];
+  specifications: Record<string, string>;
 };
 
 type Category = {
@@ -41,11 +45,15 @@ const [saving, setSaving] = useState(false);
 
 const [name, setName] = useState("");
 const [category, setCategory] = useState("");
+const [brand, setBrand] = useState("");
 const [price, setPrice] = useState("");
 const [oldPrice, setOldPrice] = useState("");
 const [stock, setStock] = useState("10");
 const [description, setDescription] = useState("");
 const [image, setImage] = useState<File | null>(null);
+const [galleryImages, setGalleryImages] = useState<File[]>([]);
+const [galleryUrlsText, setGalleryUrlsText] = useState("");
+const [specificationsText, setSpecificationsText] = useState("");
 const [editingId, setEditingId] = useState<string | null>(null);
 
 // Admin authentication
@@ -80,11 +88,18 @@ const snapshot = await getDocs(collection(db, "products"));
       id: item.id,
       name: String(data.name || ""),
       category: String(data.category || ""),
+      brand: String(data.brand || ""),
       price: Number(data.price || 0),
       oldPrice: Number(data.oldPrice || 0),
       description: String(data.description || ""),
       imageUrl: String(data.imageUrl || ""),
       stock: Math.max(0, Math.floor(Number(data.stock ?? 0))),
+      images: Array.isArray(data.images)
+        ? data.images.filter((value: unknown): value is string => typeof value === "string")
+        : [],
+      specifications: data.specifications && typeof data.specifications === "object" && !Array.isArray(data.specifications)
+        ? Object.fromEntries(Object.entries(data.specifications).map(([key, value]) => [key, String(value ?? "")]))
+        : {},
     };
   });
 
@@ -137,11 +152,15 @@ const snapshot = await getDocs(collection(db, "categories"));
 function resetForm() {
 setName("");
 setCategory(categories[0]?.name || "");
+setBrand("");
 setPrice("");
 setOldPrice("");
 setStock("10");
 setDescription("");
 setImage(null);
+setGalleryImages([]);
+setGalleryUrlsText("");
+setSpecificationsText("");
 setEditingId(null);
 
 const input = document.getElementById(
@@ -149,6 +168,8 @@ const input = document.getElementById(
 ) as HTMLInputElement | null;
 
 if (input) input.value = "";
+const galleryInput = document.getElementById("product-gallery-files") as HTMLInputElement | null;
+if (galleryInput) galleryInput.value = "";
 
 }
 
@@ -247,6 +268,40 @@ if (!editingId && !image) {
   return;
 }
 
+let parsedSpecifications: Record<string, string> = {};
+if (specificationsText.trim()) {
+  try {
+    const parsed: unknown = JSON.parse(specificationsText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Specifications must be a JSON object.");
+    }
+    parsedSpecifications = Object.fromEntries(
+      Object.entries(parsed).map(([key, value]) => [key.trim(), String(value ?? "").trim()])
+        .filter(([key, value]) => Boolean(key) && Boolean(value))
+    );
+  } catch {
+    alert('Please enter valid specifications JSON, for example: {"Color":"Black","Battery":"500 mAh"}.');
+    return;
+  }
+}
+
+const galleryUrlLines = galleryUrlsText
+  .split(/\r?\n/)
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+for (const value of galleryUrlLines) {
+  try {
+    const parsedUrl = new URL(value);
+    if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+      throw new Error("Invalid protocol");
+    }
+  } catch {
+    alert("Each gallery image URL must be a valid HTTP or HTTPS URL.");
+    return;
+  }
+}
+
 setSaving(true);
 
 try {
@@ -256,13 +311,29 @@ try {
     imageUrl = await uploadImage(image);
   }
 
+  const existingProduct = editingId
+    ? products.find((product) => product.id === editingId)
+    : undefined;
+  const uploadedGalleryUrls = galleryImages.length
+    ? await Promise.all(galleryImages.map((file) => uploadImage(file)))
+    : [];
+  const primaryImageUrl = imageUrl || existingProduct?.imageUrl || "";
+  const productImages = Array.from(new Set([
+    primaryImageUrl,
+    ...galleryUrlLines,
+    ...uploadedGalleryUrls,
+  ].filter(Boolean)));
+
   const productData: Record<string, unknown> = {
     name: name.trim(),
     category,
+    brand: brand.trim(),
     price: numericPrice,
     oldPrice: numericOldPrice,
     stock: numericStock,
     description: description.trim(),
+    images: productImages,
+    specifications: parsedSpecifications,
     updatedAt: serverTimestamp(),
   };
 
@@ -305,11 +376,15 @@ function handleEdit(product: Product) {
 setEditingId(product.id);
 setName(product.name);
 setCategory(product.category);
+setBrand(product.brand || "");
 setPrice(String(product.price));
 setOldPrice(String(product.oldPrice || ""));
 setStock(String(product.stock ?? 0));
 setDescription(product.description || "");
 setImage(null);
+setGalleryImages([]);
+setGalleryUrlsText((product.images || []).filter((url) => url !== product.imageUrl).join("\n"));
+setSpecificationsText(JSON.stringify(product.specifications || {}, null, 2));
 
 
 const input = document.getElementById(
@@ -317,6 +392,8 @@ const input = document.getElementById(
 ) as HTMLInputElement | null;
 
 if (input) input.value = "";
+const galleryInput = document.getElementById("product-gallery-files") as HTMLInputElement | null;
+if (galleryInput) galleryInput.value = "";
 
 window.scrollTo({ top: 0, behavior: "smooth" });
 
@@ -394,6 +471,20 @@ Add, edit and manage your store products. </p> </div>
           placeholder="Enter product name"
           maxLength={120}
           required
+          disabled={saving}
+        />
+
+        <label style={styles.label} htmlFor="product-brand">
+          Brand
+        </label>
+
+        <input
+          id="product-brand"
+          style={styles.input}
+          value={brand}
+          onChange={(e) => setBrand(e.target.value)}
+          placeholder="e.g. Xiaomi, Anker, JBL, Samsung"
+          maxLength={60}
           disabled={saving}
         />
 
@@ -493,8 +584,48 @@ Add, edit and manage your store products. </p> </div>
           disabled={saving}
         />
 
+        <label style={styles.label} htmlFor="product-specifications">
+          Product Specifications (JSON)
+        </label>
+        <textarea
+          id="product-specifications"
+          style={{ ...styles.input, minHeight: 100, resize: "vertical", fontFamily: "monospace" }}
+          value={specificationsText}
+          onChange={(e) => setSpecificationsText(e.target.value)}
+          placeholder={'{"Color":"Black","Battery":"500 mAh","Connectivity":"Bluetooth 5.3"}'}
+          disabled={saving}
+        />
+        <p style={styles.hint}>Enter specifications as key-value pairs in valid JSON format.</p>
+
+        <label style={styles.label} htmlFor="product-gallery-urls">
+          Additional Gallery Image URLs
+        </label>
+        <textarea
+          id="product-gallery-urls"
+          style={{ ...styles.input, minHeight: 80, resize: "vertical" }}
+          value={galleryUrlsText}
+          onChange={(e) => setGalleryUrlsText(e.target.value)}
+          placeholder={"https://example.com/image-2.jpg\nhttps://example.com/image-3.jpg"}
+          disabled={saving}
+        />
+        <p style={styles.hint}>Add one HTTP or HTTPS image URL per line. These images appear in the product gallery.</p>
+
+        <label style={styles.label} htmlFor="product-gallery-files">
+          Upload Additional Gallery Images
+        </label>
+        <input
+          id="product-gallery-files"
+          style={styles.input}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/avif"
+          multiple
+          onChange={(e) => setGalleryImages(Array.from(e.target.files || []))}
+          disabled={saving}
+        />
+        <p style={styles.hint}>{galleryImages.length} additional image(s) selected. Each image must be 5 MB or smaller.</p>
+
         <label style={styles.label} htmlFor="product-image">
-          Product Image
+          Main Product Image
         </label>
 
         <input
@@ -510,7 +641,7 @@ Add, edit and manage your store products. </p> </div>
 
         <p style={styles.hint}>
           Supported formats: JPG, PNG, WEBP, or AVIF. Maximum size: 5 MB.
-          {editingId && " Leave empty to keep the current image."}
+          {editingId && " Leave empty to keep the current main image."}
         </p>
 
         <div style={styles.buttonRow}>
@@ -568,19 +699,26 @@ Add, edit and manage your store products. </p> </div>
           {products.map((product) => (
             <article key={product.id} style={styles.productCard}>
               {product.imageUrl ? (
-                <img
-                  src={product.imageUrl}
-                  alt={product.name}
-                  style={styles.productImage}
-                />
+                <Image src={product.imageUrl} alt={product.name} width={400} height={200} unoptimized style={styles.productImage} />
               ) : (
                 <div style={styles.noImage}>No Image Available</div>
               )}
 
               <div style={styles.productInfo}>
-                <span style={styles.category}>
-                  {product.category}
-                </span>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={styles.category}>
+                    {product.category}
+                  </span>
+                  {product.brand && (
+                    <span style={{
+                      ...styles.category,
+                      color: "#027a48",
+                      background: "#ecfdf3",
+                    }}>
+                      {product.brand}
+                    </span>
+                  )}
+                </div>
 
                 <h3 style={styles.productName}>
                   {product.name}
@@ -963,3 +1101,4 @@ fontSize: "12px",
 padding: "35px 0 10px",
 },
 };
+

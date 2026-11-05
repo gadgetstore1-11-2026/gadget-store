@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
@@ -315,11 +316,7 @@ export default function InventoryPage() {
                       <td style={styles.td}>
                         <div style={styles.productCell}>
                           {product.imageUrl ? (
-                            <img
-                              src={product.imageUrl}
-                              alt={product.name}
-                              style={styles.productImage}
-                            />
+                            <Image src={product.imageUrl} alt={product.name} width={42} height={42} unoptimized style={styles.productImage} />
                           ) : (
                             <div style={styles.imagePlaceholder}>📦</div>
                           )}

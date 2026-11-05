@@ -1,11 +1,12 @@
- "use client";
+"use client";
+import Image from "next/image";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
-import "./home.css";
+
 
 const STORAGE_KEY = "gadget-store-cart";
 const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=900&q=85";
@@ -13,8 +14,9 @@ const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1505740420928-5e560c06d
 type Product = {
   id: string; name: string; category: string; price: number; oldPrice: number;
   description?: string; imageUrl: string; rating?: number; badge?: string;
-  emoji?: string; color?: string; brand?: string;
+  emoji?: string; color?: string; brand?: string; stock: number; createdAt?: number; reviewCount?: number;
 };
+type SortOption = "featured" | "price-low" | "price-high" | "newest";
 type StoreSettings = { storeName: string; logoUrl: string; phone: string; whatsapp: string; address: string };
 type CartItem = { id: string; name: string; category: string; price: number; quantity: number; emoji: string; color: string; image: string };
 
@@ -27,6 +29,11 @@ const CATEGORY_META: Record<string, { emoji: string; description: string }> = {
   Gaming: { emoji: "🎮", description: "Gear up for your games" },
 };
 const normalizeCategory = (value: string) => value.trim().replace(/\s+/g, " ").replace(/\s+\d+$/, "");
+function StoreLogo({ logoUrl, storeName }: { logoUrl: string; storeName: string }) {
+  return logoUrl
+    ? <Image src={logoUrl} alt={storeName} width={46} height={46} unoptimized className="gs-store-logo" />
+    : <span className="gs-store-logo">✦</span>;
+}
 
 export default function Home() {
   const [search, setSearch] = useState("");
@@ -41,6 +48,13 @@ export default function Home() {
   const [newsletterMessage, setNewsletterMessage] = useState("");
   const [timeLeft, setTimeLeft] = useState({ hours: 11, minutes: 59, seconds: 59 });
   const [isCustomerLoggedIn, setIsCustomerLoggedIn] = useState(false);
+  const [sortOption, setSortOption] = useState<SortOption>("featured");
+  const [selectedBrand, setSelectedBrand] = useState("All Brands");
+  const [maxPrice, setMaxPrice] = useState(50000);
+  const [wishlist, setWishlist] = useState<string[]>([]);
+  const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
+  const [recentlyViewedIds, setRecentlyViewedIds] = useState<string[]>([]);
+  const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (user) => {
@@ -58,8 +72,13 @@ export default function Home() {
           price: Number(data.price) || 0,
           oldPrice: Number(data.oldPrice) || Number(data.price) || 0,
           description: data.description || "", imageUrl: data.imageUrl || DEFAULT_IMAGE,
-          rating: Number(data.rating) || 4.8, badge: data.badge || "POPULAR",
+          rating: Number(data.rating) || 0, badge: data.badge || "POPULAR",
           emoji: data.emoji || "📦", color: data.color || "#f3f6fb", brand: data.brand || "",
+          stock: Math.max(0, Number(data.stock ?? 0)),
+          reviewCount: Math.max(0, Number(data.reviewCount || 0)),
+          createdAt: typeof data.createdAt?.toMillis === "function"
+            ? data.createdAt.toMillis()
+            : typeof data.createdAt === "string" ? new Date(data.createdAt).getTime() || 0 : 0,
         };
       });
       setProducts(list); setLoadingProducts(false); setProductError("");
@@ -72,11 +91,53 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      const items: CartItem[] = saved ? JSON.parse(saved) : [];
-      if (Array.isArray(items)) setCartCount(items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0));
-    } catch { setCartCount(0); }
+    const readIds = (key: string): string[] => {
+      try {
+        const parsed: unknown = JSON.parse(localStorage.getItem(key) || "[]");
+        return Array.isArray(parsed)
+          ? parsed.filter((value): value is string => typeof value === "string").slice(0, 50)
+          : [];
+      } catch {
+        return [];
+      }
+    };
+
+    setWishlist(readIds("gadget-store-wishlist"));
+    setRecentlyViewedIds(readIds("gadget-store-recently-viewed"));
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "gadget-store-wishlist") {
+        setWishlist(readIds("gadget-store-wishlist"));
+      }
+      if (event.key === "gadget-store-recently-viewed") {
+        setRecentlyViewedIds(readIds("gadget-store-recently-viewed"));
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        const items: CartItem[] = saved ? JSON.parse(saved) : [];
+
+        if (Array.isArray(items)) {
+          setCartCount(
+            items.reduce(
+              (sum, item) => sum + (Number(item.quantity) || 0),
+              0
+            )
+          );
+        }
+      } catch {
+        setCartCount(0);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -101,6 +162,15 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, []);
 
+  const highestProductPrice = useMemo(
+    () => Math.max(50000, ...products.map((product) => product.price)),
+    [products]
+  );
+
+  useEffect(() => {
+    setMaxPrice((current) => Math.max(current, highestProductPrice));
+  }, [highestProductPrice]);
+
   const availableCategories = useMemo(() => {
     const names = Array.from(new Set(products.map((p) => normalizeCategory(p.category)).filter(Boolean)));
     return [
@@ -111,16 +181,59 @@ export default function Home() {
 
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return products.filter((product) => {
-      const matchesCategory = category === "All Products" || normalizeCategory(product.category) === category;
-      const matchesSearch = !query || product.name.toLowerCase().includes(query) ||
-        product.category.toLowerCase().includes(query) || (product.brand || "").toLowerCase().includes(query);
-      return matchesCategory && matchesSearch;
+
+    const filtered = products.filter((product) => {
+      const matchesCategory =
+        category === "All Products" ||
+        normalizeCategory(product.category) === category;
+
+      const matchesSearch =
+        !query ||
+        product.name.toLowerCase().includes(query) ||
+        product.category.toLowerCase().includes(query) ||
+        (product.brand || "").toLowerCase().includes(query);
+
+      const matchesBrand =
+        selectedBrand === "All Brands" ||
+        (product.brand || "").trim() === selectedBrand;
+
+      const matchesPrice = product.price <= maxPrice;
+
+      return matchesCategory && matchesSearch && matchesBrand && matchesPrice;
     });
-  }, [products, search, category]);
+
+    if (sortOption === "price-low") {
+      filtered.sort((a, b) => a.price - b.price);
+    } else if (sortOption === "price-high") {
+      filtered.sort((a, b) => b.price - a.price);
+    } else if (sortOption === "newest") {
+      filtered.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    }
+
+    return filtered;
+  }, [products, search, category, selectedBrand, maxPrice, sortOption]);
+  const searchSuggestions = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (query.length < 2) return [];
+    return products
+      .filter((product) =>
+        [product.name, product.category, product.brand || ""]
+          .some((value) => value.toLowerCase().includes(query))
+      )
+      .slice(0, 6);
+  }, [products, search]);
 
   const saleProducts = useMemo(() => products.filter((p) => p.oldPrice > p.price).slice(0, 4), [products]);
   const brands = useMemo(() => Array.from(new Set(products.map((p) => p.brand?.trim()).filter((v): v is string => Boolean(v)))).slice(0, 8), [products]);
+  const recentlyViewedProducts = useMemo(
+    () =>
+      recentlyViewedIds
+        .map((id) => products.find((product) => product.id === id))
+        .filter((product): product is Product => Boolean(product)),
+    [recentlyViewedIds, products]
+  );
+
+
   const formatPrice = (price: number) => `৳${price.toLocaleString("en-BD")}`;
 
   function showNotice(message: string) {
@@ -128,9 +241,27 @@ export default function Home() {
     window.setTimeout(() => setNotice(""), 2500);
   }
 
+  function toggleWishlist(productId: string) {
+    const updated = wishlist.includes(productId)
+      ? wishlist.filter((id) => id !== productId)
+      : [...wishlist, productId];
+
+    setWishlist(updated);
+    localStorage.setItem("gadget-store-wishlist", JSON.stringify(updated));
+
+    showNotice(
+      updated.includes(productId)
+        ? "Product added to wishlist!"
+        : "Product removed from wishlist!"
+    );
+  }
   function addToCart(productId: string) {
     const product = products.find((item) => item.id === productId);
     if (!product) return;
+    if (product.stock <= 0) {
+      showNotice("This product is currently out of stock.");
+      return;
+    }
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       const items: CartItem[] = saved ? JSON.parse(saved) : [];
@@ -150,11 +281,6 @@ export default function Home() {
     } catch { showNotice("Unable to add product to cart. Please try again."); }
   }
 
-  function StoreLogo() {
-    return storeSettings.logoUrl
-      ? <img src={storeSettings.logoUrl} alt={storeSettings.storeName} className="gs-store-logo" />
-      : <span className="gs-store-logo">{storeSettings.storeName.charAt(0).toUpperCase()}</span>;
-  }
 
   function handleNewsletterSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -172,9 +298,43 @@ export default function Home() {
       <div className="gs-announcement"><div className="gs-container gs-announcement-inner"><span>⚡ MEGA GADGET SALE</span><span>Discover deals on everyday tech</span><b>Nationwide delivery across Bangladesh</b></div></div>
 
       <header className="gs-store-header gs-container">
-        <Link href="/" className="gs-store-brand" aria-label="Go to homepage"><StoreLogo /><span><strong>{storeSettings.storeName.toUpperCase()}</strong><small>TECH FOR EVERYDAY</small></span></Link>
-        <form className="gs-store-search" onSubmit={(e) => { e.preventDefault(); document.getElementById("products")?.scrollIntoView({ behavior: "smooth" }); }}>
-          <span aria-hidden="true">⌕</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search headphones, watches, chargers..." aria-label="Search products" /><button type="submit">Search</button>
+        <Link href="/" className="gs-store-brand" aria-label="Go to homepage"><StoreLogo logoUrl={storeSettings.logoUrl} storeName={storeSettings.storeName} /><span><strong>{storeSettings.storeName.toUpperCase()}</strong><small>TECH FOR EVERYDAY</small></span></Link>
+        <form className="gs-store-search" onSubmit={(e) => { e.preventDefault(); setShowSearchSuggestions(false); document.getElementById("products")?.scrollIntoView({ behavior: "smooth" }); }}>
+          <span aria-hidden="true">⌕</span>
+          <div className="gs-search-field">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => setShowSearchSuggestions(true)}
+              onBlur={() => window.setTimeout(() => setShowSearchSuggestions(false), 120)}
+              placeholder="Search headphones, watches, chargers..."
+              aria-label="Search products"
+              aria-autocomplete="list"
+              aria-expanded={showSearchSuggestions && searchSuggestions.length > 0}
+            />
+            {showSearchSuggestions && searchSuggestions.length > 0 && (
+              <div className="gs-search-suggestions" role="listbox" aria-label="Product suggestions">
+                {searchSuggestions.map((product) => (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected="false"
+                    key={product.id}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setSearch(product.name);
+                      setShowSearchSuggestions(false);
+                      document.getElementById("products")?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  >
+                    <span>{product.name}</span>
+                    <small>{product.category} · {formatPrice(product.price)}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button type="submit">Search</button>
         </form>
         <Link href="/cart" className="gs-cart-link">🛒 <span>My Cart</span><b>{cartCount}</b></Link>
       </header>
@@ -193,7 +353,7 @@ export default function Home() {
 
       <section className="gs-hero gs-container" id="home">
         <div className="gs-hero-copy"><div className="gs-hero-kicker"><span /> YOUR EVERYDAY TECH DESTINATION</div><h1>Make every day<br />a little more <em>smart.</em></h1><p>Discover useful gadgets, smart accessories and everyday tech essentials — thoughtfully selected for your lifestyle.</p><div className="gs-hero-buttons"><a href="#products" className="gs-button-primary">Shop products <span>→</span></a><a href="#categories" className="gs-button-ghost">Explore categories</a></div><div className="gs-hero-trust"><span>✓ Carefully selected gadgets</span><span>✓ Shopping made simple</span></div></div>
-        <div className="gs-hero-art"><div className="gs-hero-glow" /><div className="gs-hero-ring ring-a" /><div className="gs-hero-ring ring-b" /><div className="gs-hero-image">{featuredProduct ? <img src={featuredProduct.imageUrl || DEFAULT_IMAGE} alt={featuredProduct.name} /> : <div className="gs-hero-placeholder">⌚</div>}</div><div className="gs-float-note note-top"><span>✦</span><div><strong>Smart choices</strong><small>Everyday essentials</small></div></div><div className="gs-float-note note-bottom"><span>⚡</span><div><strong>Explore the collection</strong><small>Find your next favourite</small></div></div><div className="gs-hero-watch">✦</div></div>
+        <div className="gs-hero-art"><div className="gs-hero-glow" /><div className="gs-hero-ring ring-a" /><div className="gs-hero-ring ring-b" /><div className="gs-hero-image">{featuredProduct ? <Image src={featuredProduct.imageUrl || DEFAULT_IMAGE} alt={featuredProduct.name} width={600} height={600} unoptimized /> : <div className="gs-hero-placeholder">⌚</div>}</div><div className="gs-float-note note-top"><span>✦</span><div><strong>Smart choices</strong><small>Everyday essentials</small></div></div><div className="gs-float-note note-bottom"><span>⚡</span><div><strong>Explore the collection</strong><small>Find your next favourite</small></div></div><div className="gs-hero-watch">✦</div></div>
         <div className="gs-hero-index">01 <span>/</span> FEATURED COLLECTION</div>
       </section>
 
@@ -208,17 +368,109 @@ export default function Home() {
 
       {saleProducts.length > 0 && <section className="gs-flash-section gs-container" id="flash-sale">
         <div className="gs-flash-heading"><div><span className="gs-eyebrow">LIMITED-TIME DEALS</span><h2>⚡ Flash Sale</h2><p>Special prices on selected products.</p></div><div className="gs-countdown"><small>Offer timer</small><div><b>{String(timeLeft.hours).padStart(2, "0")}</b><span>:</span><b>{String(timeLeft.minutes).padStart(2, "0")}</b><span>:</span><b>{String(timeLeft.seconds).padStart(2, "0")}</b></div><small>Demo countdown display</small></div></div>
-        <div className="gs-flash-grid">{saleProducts.map((product) => { const discount = product.oldPrice > 0 ? Math.max(0, Math.round((1 - product.price / product.oldPrice) * 100)) : 0; return <article className="gs-flash-card" key={product.id}><div className="gs-flash-image" style={{ background: product.color }}><span>-{discount}%</span><Link href={`/product/${product.id}`} aria-label={`View ${product.name}`}><img src={product.imageUrl || DEFAULT_IMAGE} alt={product.name} loading="lazy" /></Link></div><div className="gs-flash-info"><small>{product.category}</small><h3><Link href={`/product/${product.id}`} className="gs-product-title-link">{product.name}</Link></h3><strong>{formatPrice(product.price)}</strong><del>{formatPrice(product.oldPrice)}</del><button onClick={() => addToCart(product.id)}>Add to Cart +</button></div></article>; })}</div>
+        <div className="gs-flash-grid">{saleProducts.map((product) => { const discount = product.oldPrice > 0 ? Math.max(0, Math.round((1 - product.price / product.oldPrice) * 100)) : 0; return <article className="gs-flash-card" key={product.id}><div className="gs-flash-image" style={{ background: product.color }}><span>-{discount}%</span><Link href={`/product/${product.id}`} aria-label={`View ${product.name}`}><Image src={product.imageUrl || DEFAULT_IMAGE} alt={product.name} width={400} height={400} unoptimized loading="lazy" /></Link></div><div className="gs-flash-info"><small>{product.category}</small><h3><Link href={`/product/${product.id}`} className="gs-product-title-link">{product.name}</Link></h3><strong>{formatPrice(product.price)}</strong><del>{formatPrice(product.oldPrice)}</del><button onClick={() => addToCart(product.id)} disabled={product.stock <= 0}>{product.stock > 0 ? "Add to Cart +" : "Out of Stock"}</button></div></article>; })}</div>
       </section>}
 
       <section className="gs-home-section gs-products-section" id="products">
-        <div className="gs-section-title gs-products-heading"><div><span>HANDPICKED FOR YOU</span><h2>Popular products</h2><p>Everyday essentials, all in one collection.</p></div><div className="gs-product-tabs">{availableCategories.map((item) => <button key={item.name} className={category === item.name ? "active" : ""} onClick={() => setCategory(item.name)}>{item.label}</button>)}</div></div>
+        <div className="gs-section-title gs-products-heading"><div><span>HANDPICKED FOR YOU</span><h2>Popular products</h2><p>Everyday essentials, all in one collection.</p></div><div className="gs-product-tabs">{availableCategories.map((item) => <button key={item.name} className={category === item.name ? "active" : ""} onClick={() => setCategory(item.name)}>{item.label}</button>)}</div>
+        <div className="gs-filter-toolbar">
+          <label>
+            Sort by
+            <select value={sortOption} onChange={(e) => setSortOption(e.target.value as SortOption)}>
+              <option value="featured">Featured</option>
+              <option value="price-low">Price: Low to High</option>
+              <option value="price-high">Price: High to Low</option>
+              <option value="newest">Newest</option>
+            </select>
+          </label>
+          <label>
+            Brand
+            <select value={selectedBrand} onChange={(e) => setSelectedBrand(e.target.value)}>
+              <option value="All Brands">All Brands</option>
+              {brands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
+            </select>
+          </label>
+          <label className="gs-price-filter">
+            Maximum price: <strong>{formatPrice(maxPrice)}</strong>
+            <input type="range" min="0" max={highestProductPrice} step="500" value={maxPrice} onChange={(e) => setMaxPrice(Number(e.target.value))} />
+          </label>
+          <button className="gs-reset-filters" onClick={() => {
+            setSortOption("featured");
+            setSelectedBrand("All Brands");
+            setMaxPrice(highestProductPrice);
+            setSearch("");
+            setCategory("All Products");
+          }}>Reset filters</button>
+          <Link href="/wishlist" className="gs-wishlist-link">♡ Wishlist ({wishlist.length})</Link>
+        </div></div>
         {search && <p className="gs-search-result">Showing results for <strong>“{search}”</strong></p>}
         {loadingProducts && <div className="gs-empty-state"><h3>Loading products...</h3><p>Please wait while we load our products.</p></div>}
         {!loadingProducts && productError && <div className="gs-empty-state"><h3>Unable to load products</h3><p>{productError}</p></div>}
-        {!loadingProducts && !productError && filteredProducts.length > 0 && <div className="gs-product-grid">{filteredProducts.map((product) => { const discount = product.oldPrice > product.price && product.oldPrice > 0 ? Math.round((1 - product.price / product.oldPrice) * 100) : 0; return <article className="gs-product-card" key={product.id}><div className="gs-product-visual" style={{ background: product.color }}><span className="gs-product-badge">{product.badge}</span>{discount > 0 && <span className="gs-discount-badge">-{discount}%</span>}<Link href={`/product/${product.id}`} aria-label={`View ${product.name}`}><img src={product.imageUrl || DEFAULT_IMAGE} alt={product.name} loading="lazy" /></Link><button className="gs-quick-add" onClick={() => addToCart(product.id)} aria-label={`Add ${product.name} to cart`}>+</button></div><div className="gs-product-details"><span className="gs-product-category">{product.category}</span><h3><Link href={`/product/${product.id}`} className="gs-product-title-link">{product.name}</Link></h3><div className="gs-product-rating"><span>★</span> {product.rating || 4.8}<small> Customer rating</small></div><div className="gs-product-price"><strong>{formatPrice(product.price)}</strong>{product.oldPrice > product.price && <del>{formatPrice(product.oldPrice)}</del>}</div><button className="gs-add-cart" onClick={() => addToCart(product.id)}>Add to Cart <span>+</span></button></div></article>; })}</div>}
+        {!loadingProducts && !productError && filteredProducts.length > 0 && <div className="gs-product-grid">{filteredProducts.map((product) => { const discount = product.oldPrice > product.price && product.oldPrice > 0 ? Math.round((1 - product.price / product.oldPrice) * 100) : 0; return <article className="gs-product-card" key={product.id}><div className="gs-product-visual" style={{ background: product.color }}><span className="gs-product-badge">{product.badge}</span>{discount > 0 && <span className="gs-discount-badge">-{discount}%</span>}<Link href={`/product/${product.id}`} aria-label={`View ${product.name}`}><Image src={product.imageUrl || DEFAULT_IMAGE} alt={product.name} width={400} height={400} unoptimized loading="lazy" /></Link><button className="gs-quick-add" onClick={() => addToCart(product.id)} aria-label={`Add ${product.name} to cart`} disabled={product.stock <= 0} title={product.stock <= 0 ? "Out of stock" : "Add to cart"}>+</button>
+<button className={`gs-wishlist-button ${wishlist.includes(product.id) ? "is-active" : ""}`} onClick={() => toggleWishlist(product.id)} aria-label="Toggle wishlist">{wishlist.includes(product.id) ? "♥" : "♡"}</button>
+<button className="gs-quick-view-button" onClick={() => setQuickViewProduct(product)}>Quick View</button></div><div className="gs-product-details"><span className="gs-product-category">{product.category}</span><h3><Link href={`/product/${product.id}`} className="gs-product-title-link">{product.name}</Link></h3><div className="gs-product-rating">{(product.rating || 0) > 0 ? <><span>★</span> {Number(product.rating).toFixed(1)}<small> ({product.reviewCount || 0} review{product.reviewCount === 1 ? "" : "s"})</small></> : <small>No reviews yet</small>}</div><div className="gs-product-price"><strong>{formatPrice(product.price)}</strong>{product.oldPrice > product.price && <del>{formatPrice(product.oldPrice)}</del>}</div><button className="gs-add-cart" onClick={() => addToCart(product.id)} disabled={product.stock <= 0}>{product.stock > 0 ? <>Add to Cart <span>+</span></> : "Out of Stock"}</button></div></article>; })}</div>}
         {!loadingProducts && !productError && filteredProducts.length === 0 && <div className="gs-empty-state"><span>⌕</span><h3>No products found</h3><p>Try a different search or browse all products.</p><button onClick={() => { setSearch(""); setCategory("All Products"); }}>Show all products</button></div>}
       </section>
+
+      {recentlyViewedProducts.length > 0 && (
+        <section className="gs-home-section gs-container gs-recently-viewed">
+          <div className="gs-section-title">
+            <div>
+              <span>YOUR BROWSING HISTORY</span>
+              <h2>Recently viewed</h2>
+              <p>Pick up where you left off.</p>
+            </div>
+            <button
+              className="gs-recent-clear"
+              onClick={() => {
+                localStorage.removeItem("gadget-store-recently-viewed");
+                setRecentlyViewedIds([]);
+              }}
+            >
+              Clear history
+            </button>
+          </div>
+
+          <div className="gs-recent-grid">
+            {recentlyViewedProducts.map((product) => (
+              <article className="gs-recent-card" key={product.id}>
+                <Link
+                  href={`/product/${product.id}`}
+                  className="gs-recent-image"
+                  style={{ background: product.color }}
+                >
+                  <Image
+                    src={product.imageUrl || DEFAULT_IMAGE}
+                    alt={product.name}
+                    width={300}
+                    height={300}
+                    unoptimized
+                    loading="lazy"
+                  />
+                </Link>
+
+                <div className="gs-recent-info">
+                  <span>{product.category}</span>
+                  <h3>
+                    <Link href={`/product/${product.id}`}>
+                      {product.name}
+                    </Link>
+                  </h3>
+                  <strong>{formatPrice(product.price)}</strong>
+                  {product.oldPrice > product.price && (
+                    <del>{formatPrice(product.oldPrice)}</del>
+                  )}
+                  <button onClick={() => addToCart(product.id)}>
+                    Add to Cart +
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+
 
       <section className="gs-offer-banner gs-container"><div className="gs-offer-copy"><span>MORE REASONS TO SHOP</span><h2>Enjoy free delivery<br />on orders over ৳3,000.</h2><p>Fill your cart with everyday favourites and save on delivery.</p><a href="#products">Start shopping →</a></div><div className="gs-offer-art"><div className="gs-offer-circle">৳<strong>0</strong><small>DELIVERY FEE</small></div><span className="gs-offer-spark">✦</span></div></section>
 
@@ -230,7 +482,7 @@ export default function Home() {
 
       <section className="gs-home-cta gs-container"><div><span>WELCOME TO {storeSettings.storeName.toUpperCase()}</span><h2>Your next favourite gadget is waiting.</h2><p>Explore our collection and find something made for you.</p></div><a href="#products">Explore Products →</a><div className="gs-cta-orb">{storeSettings.storeName.charAt(0).toUpperCase()}</div></section>
 
-      <footer className="gs-store-footer"><div className="gs-container gs-footer-main"><div className="gs-footer-about"><Link href="/" className="gs-store-brand"><StoreLogo /><span><strong>{storeSettings.storeName.toUpperCase()}</strong><small>TECH FOR EVERYDAY</small></span></Link><p>Your everyday destination for gadgets and tech accessories.</p></div><div className="gs-footer-column">
+      <footer className="gs-store-footer"><div className="gs-container gs-footer-main"><div className="gs-footer-about"><Link href="/" className="gs-store-brand"><StoreLogo logoUrl={storeSettings.logoUrl} storeName={storeSettings.storeName} /><span><strong>{storeSettings.storeName.toUpperCase()}</strong><small>TECH FOR EVERYDAY</small></span></Link><p>Your everyday destination for gadgets and tech accessories.</p></div><div className="gs-footer-column">
   <h3>Quick links</h3>
   <a href="#home">Home</a>
   <a href="#categories">Categories</a>
@@ -239,7 +491,31 @@ export default function Home() {
   <Link href="/cart">My cart</Link>
 </div><div className="gs-footer-column"><h3>Customer care</h3>{storeSettings.phone ? <a href={`tel:${storeSettings.phone}`}>Phone: {storeSettings.phone}</a> : <span>Customer support</span>}{storeSettings.whatsapp && <a href={`https://wa.me/${storeSettings.whatsapp.replace(/\D/g, "")}`} target="_blank" rel="noopener noreferrer">WhatsApp support</a>}{storeSettings.address && <p>{storeSettings.address}</p>}</div><div className="gs-footer-column"><h3>Shopping information</h3><span>Delivery across Bangladesh</span><span>Cash on delivery</span><span>Free delivery over ৳3,000</span></div></div><div className="gs-container gs-footer-bottom"><span>© {new Date().getFullYear()} {storeSettings.storeName}. All rights reserved.</span><span>Made for tech lovers in Bangladesh 🇧🇩</span></div></footer>
 
+      {quickViewProduct && (
+        <div className="gs-quick-view-overlay" onClick={() => setQuickViewProduct(null)}>
+          <section className="gs-quick-view-modal" role="dialog" aria-modal="true" aria-label="Product quick view" onClick={(e) => e.stopPropagation()}>
+            <button className="gs-quick-view-close" onClick={() => setQuickViewProduct(null)} aria-label="Close">×</button>
+            <div className="gs-quick-view-image" style={{ background: quickViewProduct.color }}>
+              <Image src={quickViewProduct.imageUrl || DEFAULT_IMAGE} alt={quickViewProduct.name} width={500} height={500} unoptimized />
+            </div>
+            <div className="gs-quick-view-info">
+              <span>{quickViewProduct.category}</span>
+              <h2>{quickViewProduct.name}</h2>
+              {quickViewProduct.brand && <p>Brand: {quickViewProduct.brand}</p>}
+              <strong>{formatPrice(quickViewProduct.price)}</strong>
+              {quickViewProduct.oldPrice > quickViewProduct.price && <del>{formatPrice(quickViewProduct.oldPrice)}</del>}
+              <p>{quickViewProduct.description || "Discover this product from our collection."}</p>
+              <div className="gs-quick-view-actions">
+                <button onClick={() => { addToCart(quickViewProduct.id); setQuickViewProduct(null); }}>Add to Cart</button>
+                <Link href={`/product/${quickViewProduct.id}`}>View Details →</Link>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
       {notice && <div className="gs-home-toast" role="status"><span>✓</span>{notice}<button onClick={() => setNotice("")}>×</button></div>}
     </main>
   );
 }
+
+

@@ -4,11 +4,6 @@ import { FieldValue } from "firebase-admin/firestore";
 
 export const runtime = "nodejs";
 
-function getPhoneFromEmail(email?: string): string {
-  if (!email) return "";
-  return email.replace("@accounts.gadgetstore.com", "");
-}
-
 export async function GET(request: NextRequest) {
   try {
     const authorization = request.headers.get("authorization");

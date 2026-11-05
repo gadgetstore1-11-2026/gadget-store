@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { FieldValue } from "firebase-admin/firestore";
-import { adminDb } from "@/lib/firebase-admin";
+import { adminAuth, adminDb } from "@/lib/firebase-admin";
 
 export const runtime = "nodejs";
 
@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
       .get();
 
     const reviews = snapshot.docs
+      .filter((reviewDoc) => reviewDoc.data().status === "Approved")
       .map((reviewDoc) => {
         const data = reviewDoc.data();
 
@@ -34,18 +35,10 @@ export async function GET(request: NextRequest) {
           productId: data.productId,
           productName: data.productName,
           customerName: data.customerName,
-          rating: data.rating,
+          rating: Number(data.rating) || 0,
           comment: data.comment,
-          createdAt:
-            data.createdAt?.toDate?.()?.toISOString() || null,
+          createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
         };
-      })
-      .filter((review) => {
-        const original = snapshot.docs.find(
-          (item) => item.id === review.id
-        );
-
-        return original?.data().status === "Approved";
       })
       .sort((a, b) => {
         return (
@@ -95,9 +88,19 @@ export async function POST(request: NextRequest) {
     const rating = Number(body.rating);
     const comment = String(body.comment || "").trim();
 
-    if (!productId || !orderId || !orderNumber || !phone) {
+    if (!productId || !orderNumber || !phone) {
       return NextResponse.json(
         { success: false, message: "Please provide all order details." },
+        { status: 400 }
+      );
+    }
+
+    if (
+      !/^GS-[A-Z0-9-]{4,56}$/i.test(orderNumber) ||
+      !/^01[3-9]\d{8}$/.test(phone)
+    ) {
+      return NextResponse.json(
+        { success: false, message: "Please enter a valid order number and Bangladesh phone number." },
         { status: 400 }
       );
     }
@@ -119,10 +122,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const orderRef = adminDb.collection("orders").doc(orderId);
-    const orderSnapshot = await orderRef.get();
+    let orderRef = orderId
+      ? adminDb.collection("orders").doc(orderId)
+      : null;
+    let orderSnapshot = orderRef ? await orderRef.get() : null;
 
-    if (!orderSnapshot.exists) {
+    if (!orderSnapshot || !orderSnapshot.exists) {
+      const matchingOrders = await adminDb
+        .collection("orders")
+        .where("orderNumber", "==", orderNumber.toUpperCase())
+        .limit(1)
+        .get();
+
+      if (!matchingOrders.empty) {
+        orderRef = matchingOrders.docs[0].ref;
+        orderSnapshot = matchingOrders.docs[0];
+      }
+    }
+
+    if (!orderSnapshot || !orderSnapshot.exists || !orderRef) {
       return NextResponse.json(
         { success: false, message: "Order not found." },
         { status: 404 }
@@ -130,6 +148,23 @@ export async function POST(request: NextRequest) {
     }
 
     const order = orderSnapshot.data()!;
+
+    if (order.accountUid) {
+      const authorization = request.headers.get("authorization");
+      if (!authorization?.startsWith("Bearer ")) {
+        return NextResponse.json(
+          { success: false, message: "Please sign in to review this account order." },
+          { status: 401 }
+        );
+      }
+      const decodedToken = await adminAuth.verifyIdToken(authorization.substring(7));
+      if (decodedToken.uid !== order.accountUid) {
+        return NextResponse.json(
+          { success: false, message: "This order does not belong to your account." },
+          { status: 403 }
+        );
+      }
+    }
 
     if (order.status !== "Delivered") {
       return NextResponse.json(
@@ -141,7 +176,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (String(order.orderNumber || "") !== orderNumber) {
+    if (String(order.orderNumber || "").toUpperCase() !== orderNumber.toUpperCase()) {
       return NextResponse.json(
         { success: false, message: "Order details do not match." },
         { status: 403 }
@@ -170,8 +205,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const resolvedOrderId = orderRef.id;
     const reviewId = createHash("sha256")
-      .update(`${orderId}_${productId}`)
+      .update(`${resolvedOrderId}_${productId}`)
       .digest("hex");
 
     const reviewRef = adminDb.collection("reviews").doc(reviewId);
@@ -186,8 +222,8 @@ export async function POST(request: NextRequest) {
       transaction.set(reviewRef, {
         productId,
         productName: String(purchasedItem.name || "Product"),
-        orderId,
-        orderNumber,
+        orderId: resolvedOrderId,
+        orderNumber: String(order.orderNumber || orderNumber.toUpperCase()),
         customerName: String(order.customer?.name || "Customer"),
         customerPhone: phone,
         rating,

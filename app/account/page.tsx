@@ -13,6 +13,7 @@ type Customer = {
 };
 
 type OrderItem = {
+  id?: string | number;
   name?: string;
   productName?: string;
   quantity?: number;
@@ -461,6 +462,14 @@ export default function CustomerDashboardPage() {
                                 Number(item.quantity || 1)
                               ).toLocaleString("en-BD")}
                             </strong>
+                            {order.status === "Delivered" && item.id && (
+                              <Link
+                                href={`/product/${encodeURIComponent(String(item.id))}?reviewOrderId=${encodeURIComponent(order.id)}`}
+                                className="tracking-link"
+                              >
+                                Write a Review
+                              </Link>
+                            )}
                           </div>
                         ))}
                       </div>

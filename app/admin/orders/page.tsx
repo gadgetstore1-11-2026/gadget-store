@@ -78,7 +78,6 @@ export default function AdminOrdersPage() {
   const [revenueEndDate, setRevenueEndDate] = useState("");
 
   const [newOrderCount, setNewOrderCount] = useState(0);
-  const [soundEnabled, setSoundEnabled] = useState(false);
   const [notificationEnabled, setNotificationEnabled] = useState(false);
 
   const previousOrderIds = useRef<Set<string> | null>(null);
@@ -86,6 +85,7 @@ export default function AdminOrdersPage() {
   const soundEnabledRef = useRef(false);
   const notificationEnabledRef = useRef(false);
   const messagingUnsubscribeRef = useRef<(() => void) | null>(null);
+  const enableNotificationsRef = useRef<((requestPermission?: boolean) => Promise<void>) | null>(null);
 
   function playNotificationSound() {
     try {
@@ -136,7 +136,6 @@ export default function AdminOrdersPage() {
 
           await audioContext.resume();
           soundEnabledRef.current = true;
-          setSoundEnabled(true);
         }
       }
 
@@ -224,6 +223,12 @@ console.log("FCM Registration Token:", token);
     }
   }
 
+
+
+  useEffect(() => {
+    enableNotificationsRef.current = enableNotifications;
+  });
+
   function disableNotifications() {
     localStorage.setItem("gadget-store-notifications", "disabled");
 
@@ -236,7 +241,6 @@ console.log("FCM Registration Token:", token);
     }
 
     setNotificationEnabled(false);
-    setSoundEnabled(false);
 
     if (audioContextRef.current) {
       audioContextRef.current.close();
@@ -247,22 +251,24 @@ console.log("FCM Registration Token:", token);
   }
 
   useEffect(() => {
-    const savedSetting = localStorage.getItem(
-      "gadget-store-notifications"
-    );
+    const timer = window.setTimeout(() => {
+      const savedSetting = localStorage.getItem(
+        "gadget-store-notifications"
+      );
 
-    if (
-      savedSetting === "enabled" &&
-      "Notification" in window &&
-      Notification.permission === "granted"
-    ) {
-      notificationEnabledRef.current = true;
-      setNotificationEnabled(true);
-      enableNotifications(false);
-    } else {
-      notificationEnabledRef.current = false;
-      setNotificationEnabled(false);
-    }
+      if (
+        savedSetting === "enabled" &&
+        "Notification" in window &&
+        Notification.permission === "granted"
+      ) {
+        void enableNotificationsRef.current?.(false);
+      } else {
+        notificationEnabledRef.current = false;
+        setNotificationEnabled(false);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -284,9 +290,8 @@ console.log("FCM Registration Token:", token);
           setAuthChecked(true);
           setReady(false);
 
-          void signOut(auth).finally(() => {
-            window.location.replace("/admin/orders/login");
-          });
+          // Do not sign out a customer session when a non-admin visits the admin route.
+          window.location.replace("/admin/orders/login");
 
           return;
         }

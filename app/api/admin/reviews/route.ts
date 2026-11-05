@@ -5,6 +5,34 @@ export const runtime = "nodejs";
 
 const ADMIN_UID = "MiCPapmVpcggbMozz8eV45jI7pX2";
 
+async function refreshProductRating(productId: string) {
+  if (!productId) return;
+
+  const [productSnapshot, reviewsSnapshot] = await Promise.all([
+    adminDb.collection("products").doc(productId).get(),
+    adminDb.collection("reviews").where("productId", "==", productId).get(),
+  ]);
+
+  if (!productSnapshot.exists) return;
+
+  const approvedRatings = reviewsSnapshot.docs
+    .map((reviewDoc) => reviewDoc.data())
+    .filter((review) => review.status === "Approved")
+    .map((review) => Number(review.rating))
+    .filter((rating) => Number.isFinite(rating) && rating >= 1 && rating <= 5);
+
+  const reviewCount = approvedRatings.length;
+  const rating = reviewCount
+    ? Number((approvedRatings.reduce((total, value) => total + value, 0) / reviewCount).toFixed(1))
+    : 0;
+
+  await adminDb.collection("products").doc(productId).update({
+    rating,
+    reviewCount,
+    ratingUpdatedAt: new Date(),
+  });
+}
+
 async function verifyAdmin(request: NextRequest) {
 const authorization = request.headers.get("authorization");
 
@@ -110,6 +138,8 @@ await reviewRef.update({
   updatedAt: new Date(),
 });
 
+await refreshProductRating(String(reviewSnapshot.data()?.productId || ""));
+
 return NextResponse.json({
   success: true,
   message: `Review ${status.toLowerCase()} successfully.`,
@@ -154,7 +184,9 @@ if (!reviewSnapshot.exists) {
   );
 }
 
+const productId = String(reviewSnapshot.data()?.productId || "");
 await reviewRef.delete();
+await refreshProductRating(productId);
 
 return NextResponse.json({
   success: true,

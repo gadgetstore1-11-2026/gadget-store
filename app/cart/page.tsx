@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -90,21 +91,25 @@ export default function CartPage() {
 
   // Load cart from local storage
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
 
-      if (saved) {
-        const parsed: unknown = JSON.parse(saved);
+        if (saved) {
+          const parsed: unknown = JSON.parse(saved);
 
-        if (Array.isArray(parsed)) {
-          setCart(parsed as CartItem[]);
+          if (Array.isArray(parsed)) {
+            setCart(parsed as CartItem[]);
+          }
         }
+      } catch {
+        setCart([]);
+      } finally {
+        setReady(true);
       }
-    } catch {
-      setCart([]);
-    } finally {
-      setReady(true);
-    }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, []);
 
   // Save cart to local storage
@@ -205,63 +210,71 @@ const total = subtotal + deliveryCharge;
     Math.floor(subtotal / 50) * 100
   );
 
-  const rewardDiscount = (redeemPoints / 100) * 50;
+  const selectedRedeemPoints = Math.min(redeemPoints, maxRedeemablePoints);
+  const rewardDiscount = (selectedRedeemPoints / 100) * 50;
   const finalTotal = total - rewardDiscount;
 
   // Look up reward points using the customer's mobile number
   useEffect(() => {
     const phone = customer.phone.trim();
-
-    setAvailablePoints(0);
-    setRedeemPoints(0);
-    setPointsChecked(false);
-
-    if (!/^01[3-9]\d{8}$/.test(phone)) {
-      setPointsLoading(false);
-      return;
-    }
-
     const controller = new AbortController();
+    let lookupTimer: number | undefined;
 
-    const timer = setTimeout(async () => {
-      setPointsLoading(true);
+    const resetTimer = window.setTimeout(() => {
+      setAvailablePoints(0);
+      setRedeemPoints(0);
+      setPointsChecked(false);
 
-      try {
-        const response = await fetch("/api/rewards/lookup", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ phone }),
-          signal: controller.signal,
-        });
-
-        const result = await response.json();
-
-        if (!response.ok || !result.success) {
-          throw new Error(result.error || "Points lookup failed.");
-        }
-
-        setAvailablePoints(
-          Math.max(0, Math.floor(Number(result.availablePoints) || 0))
-        );
-
-        setPointsChecked(true);
-      } catch (err) {
-        if (!controller.signal.aborted) {
-          console.error("Reward points lookup failed:", err);
-          setAvailablePoints(0);
-          setPointsChecked(false);
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setPointsLoading(false);
-        }
+      if (!/^01[3-9]\d{8}$/.test(phone)) {
+        setPointsLoading(false);
+        return;
       }
-    }, 500);
+
+      lookupTimer = window.setTimeout(async () => {
+        setPointsLoading(true);
+
+        try {
+          const response = await fetch("/api/rewards/lookup", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ phone }),
+            signal: controller.signal,
+          });
+
+          const result = await response.json();
+
+          if (!response.ok || !result.success) {
+            throw new Error(result.error || "Points lookup failed.");
+          }
+
+          setAvailablePoints(
+            Math.max(0, Math.floor(Number(result.availablePoints) || 0))
+          );
+
+          setPointsChecked(true);
+        } catch (err) {
+          if (!controller.signal.aborted) {
+            console.error("Reward points lookup failed:", err);
+            setAvailablePoints(0);
+            setPointsChecked(false);
+          }
+        } finally {
+          if (!controller.signal.aborted) {
+            setPointsLoading(false);
+          }
+        }
+      }, 500);
+    }, 0);
 
     return () => {
-      clearTimeout(timer);
+      window.clearTimeout(resetTimer);
+
+      if (lookupTimer !== undefined) {
+        window.clearTimeout(lookupTimer);
+      }
+
       controller.abort();
     };
   }, [customer.phone]);
@@ -522,17 +535,7 @@ const total = subtotal + deliveryCharge;
                     style={{ backgroundColor: item.color }}
                   >
                     {item.image ? (
-                      <img
-                        src={item.image}
-                        alt={item.name}
-                        className="cart-product-photo"
-                        onError={() =>
-                          console.log(
-                            "Cart image failed:",
-                            item.image
-                          )
-                        }
-                      />
+                      <Image src={item.image} alt={item.name} width={100} height={100} unoptimized className="cart-product-photo" />
                     ) : (
                       <span>{item.emoji}</span>
                     )}
@@ -769,6 +772,42 @@ const total = subtotal + deliveryCharge;
                   />
                 </label>
               </div>
+              {/* Reward Points */}
+              <div className="payment-method-card">
+                <div>
+                  <strong>Reward Points</strong>
+                  <p>
+                    {pointsLoading
+                      ? "Checking your available points..."
+                      : pointsChecked
+                        ? `${availablePoints.toLocaleString()} points available. 100 points = ৳50 discount.`
+                        : "Enter a valid mobile number to check your reward points."}
+                  </p>
+                  {pointsChecked && maxRedeemablePoints > 0 && (
+                    <select
+                      value={selectedRedeemPoints}
+                      onChange={(event) => setRedeemPoints(Number(event.target.value))}
+                      aria-label="Redeem reward points"
+                    >
+                      <option value={0}>Do not use points</option>
+                      {Array.from(
+                        { length: maxRedeemablePoints / 100 },
+                        (_, index) => (index + 1) * 100
+                      ).map((points) => (
+                        <option key={points} value={points}>
+                          Redeem {points} points — Save ৳{(points / 100) * 50}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {pointsChecked && availablePoints === 0 && (
+                    <p>No reward points available yet.</p>
+                  )}
+                  {rewardDiscount > 0 && (
+                    <p>Reward discount: -{money(rewardDiscount)}</p>
+                  )}
+                </div>
+              </div>
 
               {/* Payment Method */}
               <div className="payment-method-card">
@@ -785,7 +824,7 @@ const total = subtotal + deliveryCharge;
               {/* Checkout Total */}
               <div className="checkout-total">
                 <span>Order Total</span>
-                <strong>{money(total)}</strong>
+                <strong>{money(finalTotal)}</strong>
               </div>
 
               {/* Checkout Actions */}

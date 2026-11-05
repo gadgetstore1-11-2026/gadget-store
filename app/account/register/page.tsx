@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { browserLocalPersistence, createUserWithEmailAndPassword, setPersistence, updateProfile } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import {
   getCustomerAuthEmail,
@@ -50,6 +50,8 @@ export default function CustomerRegisterPage() {
       const normalizedPhone = phone.replace(/\D/g, "");
       const email = getCustomerAuthEmail(normalizedPhone);
 
+      await setPersistence(auth, browserLocalPersistence);
+
       const credential = await createUserWithEmailAndPassword(
         auth,
         email,
@@ -82,7 +84,7 @@ export default function CustomerRegisterPage() {
         );
       }
 
-      router.push("/account/login?registered=1");
+      router.replace("/account");
     } catch (err) {
       console.error("Customer registration failed:", err);
 
