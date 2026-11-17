@@ -1,0 +1,604 @@
+/* =========================================================
+   GADGET STORE - GLOBAL PREMIUM DESIGN SYSTEM
+   Premium Blue / Clean White / Responsive Layout
+========================================================= */
+
+:root {
+  --theme-primary: #245bdb;
+  --theme-primary-dark: #1746b5;
+  --theme-primary-soft: #edf3ff;
+  --theme-ink: #171a22;
+  --theme-muted: #707784;
+  --theme-bg: #f7f8fa;
+  --theme-surface: #ffffff;
+  --theme-border: #e8ebf0;
+  --theme-radius: 18px;
+  --theme-shadow: 0 8px 28px rgba(20, 35, 65, 0.07);
+  --theme-shadow-hover: 0 16px 38px rgba(20, 35, 65, 0.12);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--theme-bg);
+  color: var(--theme-ink);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a {
+  transition:
+    color .2s ease,
+    background-color .2s ease,
+    border-color .2s ease,
+    box-shadow .2s ease,
+    transform .2s ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(36, 91, 219, .22);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: #dce8ff;
+  color: #1746b5;
+}
+
+/* Shared buttons */
+
+body .cart-page button,
+body .cart-page a,
+body .pd-page button,
+body .gs-admin button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body .cart-page button,
+body .pd-page button {
+  cursor: pointer;
+}
+
+/* =========================================================
+   CART AND CHECKOUT
+========================================================= */
+
+body .cart-page {
+  min-height: 100vh;
+  background: #f7f8fa;
+  color: #171a22;
+}
+
+body .cart-page .cart-header {
+  background: #ffffff;
+  border-bottom: 1px solid #e8ebf0;
+}
+
+body .cart-page .cart-container {
+  max-width: 1240px;
+}
+
+body .cart-page .cart-items-panel,
+body .cart-page .cart-summary-panel,
+body .cart-page .checkout-panel,
+body .cart-page .checkout-order-summary {
+  background: #ffffff;
+  border: 1px solid #e8ebf0;
+  border-radius: 18px;
+  box-shadow: 0 5px 22px rgba(20, 35, 65, .045);
+}
+
+body .cart-page input,
+body .cart-page select,
+body .cart-page textarea {
+  border: 1px solid #dfe4ec;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #171a22;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+body .cart-page input:focus,
+body .cart-page select:focus,
+body .cart-page textarea:focus {
+  border-color: #245bdb;
+  box-shadow: 0 0 0 3px rgba(36, 91, 219, .1);
+  outline: none;
+}
+
+body .cart-page button[type="submit"],
+body .cart-page .checkout-submit,
+body .cart-page .cart-checkout-button,
+body .cart-page .cart-primary-button {
+  background: #245bdb;
+  border-color: #245bdb;
+  color: #ffffff;
+  border-radius: 11px;
+}
+
+body .cart-page button[type="submit"]:hover,
+body .cart-page .checkout-submit:hover,
+body .cart-page .cart-checkout-button:hover,
+body .cart-page .cart-primary-button:hover {
+  background: #1746b5;
+  border-color: #1746b5;
+  transform: translateY(-1px);
+}
+
+/* =========================================================
+   PRODUCT DETAILS
+========================================================= */
+
+body .pd-page {
+  --pd-primary: #245bdb;
+  --pd-purple: #245bdb;
+  --pd-purple-dark: #1746b5;
+  --pd-soft: #edf3ff;
+  --pd-text: #171a22;
+  --pd-muted: #707784;
+  background: #f7f8fa;
+  color: #171a22;
+}
+
+body .pd-page .pd-image-box,
+body .pd-page .pd-info,
+body .pd-page .pd-reviews,
+body .pd-page .pd-review-form,
+body .pd-page .pd-related {
+  border-radius: 18px;
+}
+
+body .pd-page .pd-image-box {
+  background: #ffffff;
+  border: 1px solid #e8ebf0;
+}
+
+body .pd-page .pd-info {
+  background: #ffffff;
+}
+
+body .pd-page button,
+body .pd-page .pd-actions a {
+  border-radius: 10px;
+}
+
+body .pd-page button:hover {
+  transform: translateY(-1px);
+}
+
+/* =========================================================
+   WISHLIST
+========================================================= */
+
+body .wishlist-page {
+  min-height: 100vh;
+  padding-bottom: 70px;
+  background: #f7f8fa;
+  color: #171a22;
+}
+
+body .wishlist-header {
+  padding: 55px 20px 48px;
+  background: linear-gradient(135deg, #ffffff 0%, #edf3ff 100%);
+  border-bottom: 1px solid #e8ebf0;
+  text-align: center;
+}
+
+body .wishlist-header h1 {
+  color: #171a22;
+  font-size: clamp(30px, 4vw, 44px);
+  font-weight: 800;
+  letter-spacing: -1.5px;
+}
+
+body .wishlist-header h1 span {
+  color: #245bdb;
+}
+
+body .wishlist-header p {
+  color: #707784;
+}
+
+body .wishlist-back {
+  color: #245bdb;
+}
+
+body .wishlist-content {
+  width: min(1180px, calc(100% - 40px));
+  margin: 40px auto;
+}
+
+body .wishlist-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+body .wishlist-section-heading h2 {
+  color: #171a22;
+}
+
+body .wishlist-section-heading p {
+  color: #707784;
+}
+
+body .wishlist-section-heading > a {
+  color: #245bdb;
+  font-weight: 700;
+}
+
+body .wishlist-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
+}
+
+body .wishlist-card {
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #e8ebf0;
+  border-radius: 17px;
+  box-shadow: 0 5px 20px rgba(20, 35, 65, .045);
+  transition: transform .25s ease, box-shadow .25s ease;
+}
+
+body .wishlist-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 15px 35px rgba(20, 35, 65, .1);
+}
+
+body .wishlist-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  padding: 20px;
+  background: #f8f9fc;
+}
+
+body .wishlist-image img {
+  width: 100%;
+  height: 190px;
+  object-fit: contain;
+}
+
+body .wishlist-details {
+  padding: 20px;
+}
+
+body .wishlist-details > span {
+  color: #707784;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .7px;
+}
+
+body .wishlist-details h3 {
+  margin: 9px 0 14px;
+  color: #171a22;
+  font-size: 17px;
+}
+
+body .wishlist-details h3 a {
+  color: inherit;
+  text-decoration: none;
+}
+
+body .wishlist-price {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+body .wishlist-price strong {
+  color: #245bdb;
+  font-size: 20px;
+}
+
+body .wishlist-price del {
+  color: #9299a5;
+  font-size: 13px;
+}
+
+body .wishlist-actions {
+  display: flex;
+  gap: 10px;
+}
+
+body .wishlist-actions a,
+body .wishlist-actions button {
+  flex: 1;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid #245bdb;
+  border-radius: 9px;
+  background: #245bdb;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+body .wishlist-actions button {
+  background: #ffffff;
+  color: #245bdb;
+}
+
+body .wishlist-actions a:hover {
+  background: #1746b5;
+}
+
+body .wishlist-actions button:hover {
+  background: #edf3ff;
+}
+
+body .wishlist-empty {
+  padding: 70px 20px;
+  border: 1px solid #e8ebf0;
+  border-radius: 18px;
+  background: #ffffff;
+  text-align: center;
+}
+
+body .wishlist-empty-icon {
+  display: block;
+  margin-bottom: 15px;
+  color: #245bdb;
+  font-size: 55px;
+}
+
+body .wishlist-empty h2 {
+  color: #171a22;
+}
+
+body .wishlist-empty p {
+  color: #707784;
+}
+
+body .wishlist-empty > a {
+  display: inline-flex;
+  margin-top: 15px;
+  padding: 12px 22px;
+  border-radius: 10px;
+  background: #245bdb;
+  color: #ffffff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* =========================================================
+   CUSTOMER ACCOUNT DASHBOARD
+========================================================= */
+
+html body .customer-dashboard {
+  min-height: 100vh;
+  background: #f7f8fa !important;
+  color: #171a22 !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+
+html body .customer-dashboard .dashboard-header {
+  background: #ffffff !important;
+  border-bottom: 1px solid #e8ebf0 !important;
+  box-shadow: 0 3px 15px rgba(20, 35, 65, .035);
+}
+
+html body .customer-dashboard .dashboard-header a,
+html body .customer-dashboard .panel a {
+  color: #245bdb;
+}
+
+html body .customer-dashboard .welcome-section,
+html body .customer-dashboard .panel,
+html body .customer-dashboard .stat-card {
+  border: 1px solid #e8ebf0 !important;
+  border-radius: 17px !important;
+  background: #ffffff !important;
+  box-shadow: 0 5px 20px rgba(20, 35, 65, .045);
+}
+
+html body .customer-dashboard .welcome-section h1,
+html body .customer-dashboard .panel-heading,
+html body .customer-dashboard .stat-card strong {
+  color: #171a22 !important;
+}
+
+html body .customer-dashboard .profile-avatar {
+  background: #edf3ff !important;
+  color: #245bdb !important;
+}
+
+html body .customer-dashboard .stat-card {
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+
+html body .customer-dashboard .stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(20, 35, 65, .09);
+}
+
+html body .customer-dashboard button {
+  border-radius: 10px;
+}
+
+/* =========================================================
+   ADMIN PANEL
+========================================================= */
+
+html body .gs-admin {
+  --gs-purple: #245bdb;
+  --gs-purple-dark: #1746b5;
+  --gs-purple-light: #edf3ff;
+  --gs-ink: #171a22;
+  --gs-muted: #707784;
+  --gs-line: #e8ebf0;
+  --gs-page: #f7f8fa;
+  background: #f7f8fa;
+  color: #171a22;
+}
+
+html body .gs-admin .gs-sidebar {
+  background: #ffffff;
+  border-right: 1px solid #e8ebf0;
+  box-shadow: 4px 0 20px rgba(20, 35, 65, .035);
+}
+
+html body .gs-admin .gs-topbar {
+  background: #ffffff;
+  border-bottom: 1px solid #e8ebf0;
+}
+
+html body .gs-admin .gs-sidebar a,
+html body .gs-admin .gs-sidebar button {
+  border-radius: 9px;
+}
+
+html body .gs-admin .gs-sidebar a:hover,
+html body .gs-admin .gs-sidebar button:hover {
+  background: #edf3ff;
+  color: #245bdb;
+}
+
+html body .gs-admin .gs-stats-grid > *,
+html body .gs-admin .gs-orders-section,
+html body .gs-admin .gs-order-card,
+html body .gs-admin .gs-detail-box,
+html body .gs-admin .gs-sales-banner {
+  border-radius: 15px;
+}
+
+html body .gs-admin button {
+  cursor: pointer;
+}
+
+html body .gs-admin input,
+html body .gs-admin select,
+html body .gs-admin textarea {
+  border-color: #dfe4ec;
+  border-radius: 9px;
+}
+
+html body .gs-admin input:focus,
+html body .gs-admin select:focus,
+html body .gs-admin textarea:focus {
+  border-color: #245bdb;
+  outline: 3px solid rgba(36, 91, 219, .1);
+}
+
+html body .gs-admin .gs-status-badge {
+  border-radius: 20px;
+}
+
+/* =========================================================
+   GLOBAL RESPONSIVE ADJUSTMENTS
+========================================================= */
+
+@media (max-width: 900px) {
+  body .wishlist-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  body .wishlist-header {
+    padding: 38px 16px 32px;
+  }
+
+  body .wishlist-content {
+    width: calc(100% - 28px);
+    margin: 25px auto;
+  }
+
+  body .wishlist-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  body .wishlist-image {
+    min-height: 145px;
+    padding: 12px;
+  }
+
+  body .wishlist-image img {
+    height: 125px;
+  }
+
+  body .wishlist-details {
+    padding: 12px;
+  }
+
+  body .wishlist-details h3 {
+    font-size: 14px;
+  }
+
+  body .wishlist-price {
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  body .wishlist-price strong {
+    font-size: 16px;
+  }
+
+  body .wishlist-actions {
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  body .wishlist-actions a,
+  body .wishlist-actions button {
+    min-height: 37px;
+    font-size: 11px;
+  }
+
+  body .wishlist-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  html body .customer-dashboard .dashboard-grid,
+  html body .customer-dashboard .stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

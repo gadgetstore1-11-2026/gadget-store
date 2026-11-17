@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authorization.substring(7);
-    const decodedToken = await adminAuth.verifyIdToken(token);
+    const decodedToken = await adminAuth.verifyIdToken(token, true);
 
     const customerRef = adminDb
       .collection("customerAccounts")
@@ -104,14 +104,14 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authorization.substring(7);
-    const decodedToken = await adminAuth.verifyIdToken(token);
+    const decodedToken = await adminAuth.verifyIdToken(token, true);
 
     const body = await request.json();
 
     const name = String(body.name || "").trim();
     const phone = String(body.phone || "").replace(/\D/g, "");
 
-    if (!name || !/^01[3-9]\d{8}$/.test(phone)) {
+    if (!name || name.length > 80 || !/^01[3-9]\d{8}$/.test(phone)) {
       return NextResponse.json(
         { success: false, error: "Invalid name or phone number." },
         { status: 400 }

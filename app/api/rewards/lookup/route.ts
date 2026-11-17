@@ -1,19 +1,56 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
-import { adminDb } from "@/lib/firebase-admin";
+import { adminAuth, adminDb } from "@/lib/firebase-admin";
+import { normalizePhone, isValidBangladeshPhone } from "@/lib/customer-auth";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   try {
-    const data = await request.json();
-    const phone =
-      typeof data.phone === "string" ? data.phone.trim() : "";
+    const authorization = request.headers.get("authorization");
 
-    if (!/^01[3-9]\d{8}$/.test(phone)) {
+    if (!authorization?.startsWith("Bearer ")) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required." },
+        { status: 401 }
+      );
+    }
+
+    const token = authorization.substring(7);
+    const decodedToken = await adminAuth.verifyIdToken(token);
+
+    const body = await request.json();
+    const phone =
+      typeof body.phone === "string" ? normalizePhone(body.phone) : "";
+
+    if (!isValidBangladeshPhone(phone)) {
       return NextResponse.json(
         { success: false, error: "Please enter a valid Bangladesh mobile number." },
         { status: 400 }
+      );
+    }
+
+    const expectedEmail = `${phone}@accounts.gadgetstore.com`;
+
+    if (decodedToken.email !== expectedEmail) {
+      return NextResponse.json(
+        { success: false, error: "Account phone number mismatch." },
+        { status: 403 }
+      );
+    }
+
+    const accountDoc = await adminDb
+      .collection("customerAccounts")
+      .doc(decodedToken.uid)
+      .get();
+
+    if (
+      !accountDoc.exists ||
+      accountDoc.data()?.phone !== phone
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Customer account verification failed." },
+        { status: 403 }
       );
     }
 
@@ -26,15 +63,32 @@ export async function POST(request: NextRequest) {
       .doc(customerId)
       .get();
 
-    const points = customerDoc.exists
-      ? Math.max(0, Math.floor(Number(customerDoc.data()?.rewardPoints) || 0))
-      : 0;
+    const rawRewardPoints = customerDoc.exists
+      ? customerDoc.data()?.rewardPoints
+      : undefined;
 
-    return NextResponse.json({
-      success: true,
-      availablePoints: points,
-      discountValue: Math.floor(points / 100) * 50,
-    });
+    const points = rawRewardPoints === undefined ? 0 : rawRewardPoints;
+
+    if (
+      typeof points !== "number" ||
+      !Number.isSafeInteger(points) ||
+      points < 0
+    ) {
+      throw new Error("Customer reward balance is invalid.");
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        availablePoints: points,
+        discountValue: Math.floor(points / 100) * 50,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
+    );
   } catch (error) {
     console.error("Reward points lookup failed:", error);
 

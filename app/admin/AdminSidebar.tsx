@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -8,8 +8,6 @@ import { auth } from "@/lib/firebase";
 export default function AdminSidebar() {
   const pathname = usePathname();
   const router = useRouter();
-
-  const isActive = (path: string) => pathname === path;
 
   async function handleLogout() {
     try {
@@ -21,14 +19,16 @@ export default function AdminSidebar() {
   }
 
   const links = [
-    { href: "/admin/orders#dashboard", icon: "▦", label: "Dashboard", path: "/admin/orders" },
-    { href: "/admin/orders#orders", icon: "▤", label: "Orders", path: "/admin/orders" },
-    { href: "/admin/products", icon: "▣", label: "Products", path: "/admin/products" },
-    { href: "/admin/inventory", icon: "▦", label: "Inventory", path: "/admin/inventory" },
-    { href: "/admin/categories", icon: "▦", label: "Categories", path: "/admin/categories" },
-    { href: "/admin/customers", icon: "👥", label: "Customers", path: "/admin/customers" },
-    { href: "/admin/reviews", icon: "★", label: "Reviews", path: "/admin/reviews" },
-    { href: "/admin/settings", icon: "⚙", label: "Settings", path: "/admin/settings" },
+    { href: "/admin/dashboard", path: "/admin/dashboard", icon: "▦", label: "Dashboard" },
+    { href: "/admin/orders", path: "/admin/orders", icon: "▤", label: "Orders" },
+    { href: "/admin/payments", path: "/admin/payments", icon: "৳", label: "Payments" },
+    { href: "/admin/products", path: "/admin/products", icon: "▣", label: "Products" },
+    { href: "/admin/inventory", path: "/admin/inventory", icon: "▦", label: "Inventory" },
+    { href: "/admin/categories", path: "/admin/categories", icon: "▦", label: "Categories" },
+    { href: "/admin/customers", path: "/admin/customers", icon: "👥", label: "Customers" },
+    { href: "/admin/reviews", path: "/admin/reviews", icon: "★", label: "Reviews" },
+    { href: "/admin/homepage", path: "/admin/homepage", icon: "▣", label: "Homepage" },
+    { href: "/admin/settings", path: "/admin/settings", icon: "⚙", label: "Settings" },
   ];
 
   return (
@@ -44,23 +44,20 @@ export default function AdminSidebar() {
       <div className="gs-sidebar-section">
         <span className="gs-sidebar-heading">MENU</span>
 
-        {links.map((link, index) => (
-          <Link
-            key={`${link.label}-${index}`}
-            href={link.href}
-            className={`gs-sidebar-link ${
-              isActive(link.path) &&
-              (link.label === "Dashboard" || link.label === "Orders")
-                ? "active"
-                : isActive(link.path) && link.label !== "Dashboard" && link.label !== "Orders"
-                  ? "active"
-                  : ""
-            }`}
-          >
-            <span>{link.icon}</span>
-            {link.label}
-          </Link>
-        ))}
+        {links.map((link) => {
+          const active = pathname === link.path;
+
+          return (
+            <Link
+              key={link.label}
+              href={link.href}
+              className={`gs-sidebar-link ${active ? "active" : ""}`}
+            >
+              <span>{link.icon}</span>
+              {link.label}
+            </Link>
+          );
+        })}
 
         <Link href="/" className="gs-sidebar-link">
           <span>▣</span>

@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase-admin";
 
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authorization.substring(7);
-    const decodedToken = await adminAuth.verifyIdToken(token);
+    const decodedToken = await adminAuth.verifyIdToken(token, true);
 
     if (decodedToken.uid !== ADMIN_UID) {
       return NextResponse.json(
@@ -33,25 +33,63 @@ export async function GET(request: NextRequest) {
 
     const ledgerBalances = new Map<string, number>();
 
-    transactionsSnapshot.docs.forEach((doc) => {
+    for (const doc of transactionsSnapshot.docs) {
       const data = doc.data();
-      const customerId = String(data.customerId || "");
-      const points = Number(data.points || 0);
+      const customerId = data.customerId;
+      const points = data.points;
 
-      if (!customerId || !Number.isFinite(points)) return;
+      if (
+        typeof customerId !== "string" ||
+        !/^[a-f0-9]{64}$/i.test(customerId)
+      ) {
+        throw new Error(`Invalid customer ID in reward ledger: ${doc.id}`);
+      }
 
-      ledgerBalances.set(
-        customerId,
-        (ledgerBalances.get(customerId) || 0) + points
-      );
-    });
+      if (
+        typeof points !== "number" ||
+        !Number.isSafeInteger(points)
+      ) {
+        throw new Error(`Invalid points value in reward ledger: ${doc.id}`);
+      }
+
+      const accumulatedPoints =
+        (ledgerBalances.get(customerId) || 0) + points;
+
+      if (!Number.isSafeInteger(accumulatedPoints)) {
+        throw new Error(`Reward ledger overflow for customer: ${customerId}`);
+      }
+
+      ledgerBalances.set(customerId, accumulatedPoints);
+    }
+
+    const customerIds = new Set(customersSnapshot.docs.map((doc) => doc.id));
+
+    for (const customerId of ledgerBalances.keys()) {
+      if (!customerIds.has(customerId)) {
+        throw new Error(`Reward ledger references a missing customer: ${customerId}`);
+      }
+    }
 
     const preview = customersSnapshot.docs.map((doc) => {
       const data = doc.data();
       const customerId = doc.id;
-      const currentPoints = Math.max(0, Number(data.rewardPoints || 0));
+      const rawRewardPoints = data.rewardPoints;
+      const currentPoints =
+        rawRewardPoints === undefined ? 0 : rawRewardPoints;
+
+      if (
+        typeof currentPoints !== "number" ||
+        !Number.isSafeInteger(currentPoints) ||
+        currentPoints < 0
+      ) {
+        throw new Error(`Invalid reward balance for customer: ${customerId}`);
+      }
       const ledgerPoints = ledgerBalances.get(customerId) || 0;
       const openingPoints = currentPoints - ledgerPoints;
+
+      if (!Number.isSafeInteger(openingPoints)) {
+        throw new Error(`Opening balance overflow for customer: ${customerId}`);
+      }
 
       let action = "reconciled";
 
@@ -78,7 +116,16 @@ export async function GET(request: NextRequest) {
       (item) => item.action === "ledger-exceeds-balance"
     );
 
-    return NextResponse.json({
+    const totalOpeningPoints = eligible.reduce((sum, item) => {
+      const total = sum + item.openingPoints;
+
+      if (!Number.isSafeInteger(total)) {
+        throw new Error("Total opening reward points exceed the safe integer limit.");
+      }
+
+      return total;
+    }, 0);
+return NextResponse.json({
       success: true,
       readOnly: true,
       summary: {
@@ -87,10 +134,7 @@ export async function GET(request: NextRequest) {
           (item) => item.currentPoints > 0
         ).length,
         openingBalancesNeeded: eligible.length,
-        totalOpeningPoints: eligible.reduce(
-          (sum, item) => sum + item.openingPoints,
-          0
-        ),
+        totalOpeningPoints,
         discrepancies: discrepancies.length,
       },
       openingBalances: eligible,

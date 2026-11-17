@@ -263,6 +263,90 @@ function CustomerLoginForm() {
             padding: 25px 20px;
           }
         }
+        .customer-login-page,
+        .customer-auth-page {
+          background:
+            radial-gradient(ellipse at 15% 15%, rgba(130, 91, 210, 0.13), transparent 42%),
+            radial-gradient(ellipse at 85% 85%, rgba(100, 65, 180, 0.10), transparent 40%),
+            #f7f6fc;
+        }
+
+        .customer-login-card,
+        .customer-auth-card {
+          border: 1px solid #eee8f8;
+          border-radius: 22px;
+          box-shadow: 0 20px 60px rgba(45, 25, 90, 0.10);
+        }
+
+        .customer-login-brand,
+        .customer-auth-brand {
+          color: #6941c6;
+          letter-spacing: -0.7px;
+        }
+
+        .customer-login-heading span,
+        .customer-auth-heading span {
+          color: #7952ce;
+        }
+
+        .customer-login-heading h1,
+        .customer-auth-heading h1 {
+          color: #211b35;
+          letter-spacing: -0.7px;
+        }
+
+        .customer-login-form input,
+        .customer-auth-form input {
+          min-height: 48px;
+          border: 1px solid #e5deef;
+          border-radius: 10px;
+          background: #fdfcff;
+          transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .customer-login-form input:focus,
+        .customer-auth-form input:focus {
+          border-color: #8057d5;
+          box-shadow: 0 0 0 3px rgba(128, 87, 213, 0.12);
+        }
+
+        .customer-login-form button,
+        .customer-auth-form button {
+          min-height: 49px;
+          border-radius: 10px;
+          background: linear-gradient(110deg, #59349f, #8057d5);
+          box-shadow: 0 7px 18px rgba(89, 52, 159, 0.20);
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .customer-login-form button:hover:not(:disabled),
+        .customer-auth-form button:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 22px rgba(89, 52, 159, 0.26);
+        }
+
+        .customer-login-footer a,
+        .customer-auth-footer a {
+          color: #6941c6;
+        }
+
+        .customer-login-home,
+        .customer-auth-home {
+          transition: color 0.2s ease;
+        }
+
+        .customer-login-home:hover,
+        .customer-auth-home:hover {
+          color: #6941c6;
+        }
+
+        @media (max-width: 480px) {
+          .customer-login-card,
+          .customer-auth-card {
+            padding: 28px 21px;
+            border-radius: 17px;
+          }
+        }
       `}</style>
     </main>
   );

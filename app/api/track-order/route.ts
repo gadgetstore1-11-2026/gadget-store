@@ -32,7 +32,35 @@ function toISOString(value: unknown): string | null {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let bodyValue: unknown;
+
+    try {
+      bodyValue = await request.json();
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid request data.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      !bodyValue ||
+      typeof bodyValue !== "object" ||
+      Array.isArray(bodyValue)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid request data.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const body = bodyValue as Record<string, unknown>;
 
     const orderNumber =
       typeof body.orderNumber === "string"

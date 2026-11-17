@@ -1255,3 +1255,43 @@
 
 /* Shared Admin Layout */
 .gs-admin-main > .gs-admin > .gs-sidebar { display: none; }
+
+
+/* Admin sidebar independent scrolling */
+.gs-sidebar {
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+}
+
+.gs-sidebar-brand {
+  flex: 0 0 auto;
+}
+
+.gs-sidebar-section {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #d8d0f2 transparent;
+  padding: 0 3px 12px 0;
+}
+
+.gs-sidebar-section::-webkit-scrollbar {
+  width: 6px;
+}
+
+.gs-sidebar-section::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.gs-sidebar-section::-webkit-scrollbar-thumb {
+  border-radius: 10px;
+  background: #d8d0f2;
+}
+
+.gs-sidebar-bottom {
+  flex: 0 0 auto;
+}

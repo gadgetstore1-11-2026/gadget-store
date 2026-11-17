@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot } from "firebase/firestore";
@@ -9,6 +9,7 @@ import CustomerExportButton from "./export-button";
 import { subscribeToOrders, type Order } from "@/lib/orders";
 
 type FirestoreCustomer = {
+  documentId?: string;
   name?: string;
   phone?: string;
   district?: string;
@@ -24,6 +25,7 @@ type FirestoreCustomer = {
 
 type CustomerRecord = {
   id: string;
+  customerId: string | null;
   name: string;
   phone: string;
   district: string;
@@ -34,6 +36,18 @@ type CustomerRecord = {
   totalRewardPointsEarned: number;
   lastOrder: string;
   orders: Order[];
+};
+
+type RewardTransaction = {
+  id: string;
+  customerId: string;
+  orderId: string;
+  orderNumber: string;
+  type: "earn" | "redeem" | "reverse" | "refund";
+  points: number;
+  discount: number;
+  description: string;
+  createdAt: string;
 };
 
 const ADMIN_UID = "MiCPapmVpcggbMozz8eV45jI7pX2";
@@ -123,6 +137,7 @@ function buildCustomerList(
 
     const customer: CustomerRecord = {
       id,
+      customerId: /^[a-f0-9]{64}$/i.test(doc.documentId || "") ? doc.documentId! : null,
       name: doc.name?.trim() || "Unknown Customer",
       phone,
       district: doc.district || "",
@@ -163,6 +178,7 @@ function buildCustomerList(
 
       customer = {
         id,
+        customerId: order.customerId && /^[a-f0-9]{64}$/i.test(order.customerId) ? order.customerId : null,
         name: order.customer?.name?.trim() || "Unknown Customer",
         phone,
         district: order.customer?.district || "",
@@ -222,12 +238,184 @@ export default function CustomersPage() {
   const [selectedCustomer, setSelectedCustomer] =
     useState<CustomerRecord | null>(null);
 
+  const [rewardTransactions, setRewardTransactions] =
+    useState<RewardTransaction[]>([]);
+  const [rewardHistoryLoading, setRewardHistoryLoading] = useState(false);
+  const [rewardHistoryLoadingMore, setRewardHistoryLoadingMore] = useState(false);
+  const [rewardHistoryError, setRewardHistoryError] = useState("");
+  const [rewardHistoryCursor, setRewardHistoryCursor] = useState<string | null>(null);
+  const [rewardHistoryHasMore, setRewardHistoryHasMore] = useState(false);
+  const rewardHistoryRequestRef = useRef(0);
+
   const [error, setError] = useState("");
   const [openingPreview, setOpeningPreview] =
     useState<OpeningBalancePreview | null>(null);
   const [openingPreviewLoading, setOpeningPreviewLoading] = useState(false);
   const [openingPreviewError, setOpeningPreviewError] = useState("");
 
+  useEffect(() => {
+    const customerId = selectedCustomer?.customerId;
+    const requestId = ++rewardHistoryRequestRef.current;
+    const controller = new AbortController();
+    let active = true;
+
+    setRewardTransactions([]);
+    setRewardHistoryCursor(null);
+    setRewardHistoryHasMore(false);
+    setRewardHistoryError("");
+    setRewardHistoryLoadingMore(false);
+
+    if (!selectedCustomer) {
+      setRewardHistoryLoading(false);
+      return () => {
+        active = false;
+        controller.abort();
+      };
+    }
+
+    if (!customerId) {
+      setRewardHistoryLoading(false);
+      setRewardHistoryError(
+        "Reward transaction history is unavailable for this customer."
+      );
+      return () => {
+        active = false;
+        controller.abort();
+      };
+    }
+
+    const loadRewardHistory = async () => {
+      setRewardHistoryLoading(true);
+
+      try {
+        const user = auth.currentUser;
+
+        if (!user) {
+          throw new Error("Admin authentication required.");
+        }
+
+        const token = await user.getIdToken();
+        const params = new URLSearchParams({ customerId });
+
+        const response = await fetch(
+          `/api/admin/rewards/transactions?${params.toString()}`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: "no-store",
+            signal: controller.signal,
+          }
+        );
+
+        const data = await response.json() as {
+          success?: boolean;
+          error?: string;
+          transactions?: RewardTransaction[];
+          pagination?: {
+            hasMore?: boolean;
+            nextCursor?: string | null;
+          };
+        };
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || "Unable to load reward history.");
+        }
+
+        if (!active || requestId !== rewardHistoryRequestRef.current) return;
+
+        setRewardTransactions(data.transactions || []);
+        setRewardHistoryCursor(data.pagination?.nextCursor || null);
+        setRewardHistoryHasMore(Boolean(data.pagination?.hasMore));
+      } catch (error) {
+        if (
+          !active ||
+          (error instanceof Error && error.name === "AbortError")
+        ) return;
+
+        setRewardHistoryError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load reward history."
+        );
+      } finally {
+        if (active && requestId === rewardHistoryRequestRef.current) {
+          setRewardHistoryLoading(false);
+        }
+      }
+    };
+
+    void loadRewardHistory();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [selectedCustomer?.id, selectedCustomer?.customerId]);
+
+  const handleLoadMoreRewardHistory = async () => {
+    const customerId = selectedCustomer?.customerId;
+    const cursor = rewardHistoryCursor;
+
+    if (!customerId || !cursor || rewardHistoryLoadingMore) return;
+
+    const requestId = rewardHistoryRequestRef.current;
+
+    try {
+      setRewardHistoryLoadingMore(true);
+      setRewardHistoryError("");
+
+      const user = auth.currentUser;
+
+      if (!user) {
+        throw new Error("Admin authentication required.");
+      }
+
+      const token = await user.getIdToken();
+      const params = new URLSearchParams({ customerId, cursor });
+
+      const response = await fetch(
+        `/api/admin/rewards/transactions?${params.toString()}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        }
+      );
+
+      const data = await response.json() as {
+        success?: boolean;
+        error?: string;
+        transactions?: RewardTransaction[];
+        pagination?: {
+          hasMore?: boolean;
+          nextCursor?: string | null;
+        };
+      };
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Unable to load more reward history.");
+      }
+
+      if (requestId !== rewardHistoryRequestRef.current) return;
+
+      setRewardTransactions((current) => [
+        ...current,
+        ...(data.transactions || []),
+      ]);
+      setRewardHistoryCursor(data.pagination?.nextCursor || null);
+      setRewardHistoryHasMore(Boolean(data.pagination?.hasMore));
+    } catch (error) {
+      if (requestId !== rewardHistoryRequestRef.current) return;
+
+      setRewardHistoryError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load more reward history."
+      );
+    } finally {
+      if (requestId === rewardHistoryRequestRef.current) {
+        setRewardHistoryLoadingMore(false);
+      }
+    }
+  };
   const handleOpeningBalancePreview = async () => {
     try {
       setOpeningPreviewLoading(true);
@@ -306,6 +494,7 @@ export default function CustomersPage() {
 
           const data = snapshot.docs.map((item) => ({
             ...item.data(),
+            documentId: item.id,
           })) as FirestoreCustomer[];
 
           setCustomerDocs(data);
@@ -394,14 +583,14 @@ export default function CustomersPage() {
 
   const cardStyle = {
     background: "#ffffff",
-    border: "1px solid #e8edf3",
+    border: "1px solid #eeeaf7",
     borderRadius: "16px",
     padding: "22px",
-    boxShadow: "0 3px 12px rgba(15,23,42,0.035)",
+    boxShadow: "0 8px 28px rgba(91,58,155,0.07)",
   } as const;
 
   const buttonStyle = {
-    border: "1px solid #e2e8f0",
+    border: "1px solid #e9e3f4",
     background: "#ffffff",
     borderRadius: "9px",
     padding: "9px 13px",
@@ -413,9 +602,9 @@ export default function CustomersPage() {
     <main
       style={{
         minHeight: "100vh",
-        background: "#f5f7fb",
+        background: "#f7f6fc",
         padding: "30px",
-        color: "#172033",
+        color: "#211b35",
         fontFamily: "Arial, sans-serif",
       }}
     >
@@ -435,7 +624,7 @@ export default function CustomersPage() {
           <div>
             <div
               style={{
-                color: "#64748b",
+                color: "#786f8b",
                 fontSize: "13px",
                 marginBottom: "8px",
               }}
@@ -443,13 +632,13 @@ export default function CustomersPage() {
               Admin Panel / Customers
             </div>
 
-            <h1 style={{ fontSize: "28px", margin: 0, fontWeight: 800 }}>
+            <h1 style={{ fontSize: "clamp(24px, 3vw, 30px)", margin: 0, fontWeight: 800, letterSpacing: "-0.7px" }}>
               Customers
             </h1>
 
             <p
               style={{
-                color: "#64748b",
+                color: "#786f8b",
                 margin: "9px 0 0",
                 fontSize: "14px",
               }}
@@ -479,7 +668,7 @@ export default function CustomersPage() {
     style={{
       ...buttonStyle,
       padding: "12px 18px",
-      color: "#334155",
+      color: "#211b35",
     }}
   >
     ← Dashboard
@@ -520,7 +709,7 @@ export default function CustomersPage() {
                 <h2 style={{ margin: 0, fontSize: "19px" }}>
                   Opening Balance Preview
                 </h2>
-                <p style={{ color: "#64748b", fontSize: "13px" }}>
+                <p style={{ color: "#786f8b", fontSize: "13px" }}>
                   Read-only report. No reward points have been changed.
                 </p>
               </div>
@@ -565,12 +754,12 @@ export default function CustomersPage() {
                 <div
                   key={item.label}
                   style={{
-                    background: "#f8fafc",
+                    background: "#faf8ff",
                     borderRadius: "11px",
                     padding: "15px",
                   }}
                 >
-                  <div style={{ color: "#64748b", fontSize: "12px" }}>
+                  <div style={{ color: "#786f8b", fontSize: "12px" }}>
                     {item.label}
                   </div>
                   <strong style={{ fontSize: "23px" }}>
@@ -585,7 +774,7 @@ export default function CustomersPage() {
                 <h3 style={{ color: "#dc2626", fontSize: "15px" }}>
                   Balance Discrepancies
                 </h3>
-                <p style={{ color: "#64748b", fontSize: "13px" }}>
+                <p style={{ color: "#786f8b", fontSize: "13px" }}>
                   These customers need investigation before migration.
                 </p>
 
@@ -640,7 +829,7 @@ export default function CustomersPage() {
               style={{
                 marginTop: "18px",
                 fontSize: "12px",
-                color: "#64748b",
+                color: "#786f8b",
               }}
             >
               This report is for review only. Opening balances have not been
@@ -657,7 +846,7 @@ export default function CustomersPage() {
           }}
         >
           <div style={cardStyle}>
-            <div style={{ color: "#64748b", fontSize: "14px" }}>
+            <div style={{ color: "#786f8b", fontSize: "14px" }}>
               Total Customers
             </div>
 
@@ -677,7 +866,7 @@ export default function CustomersPage() {
           </div>
 
           <div style={cardStyle}>
-            <div style={{ color: "#64748b", fontSize: "14px" }}>
+            <div style={{ color: "#786f8b", fontSize: "14px" }}>
               Total Orders
             </div>
 
@@ -691,13 +880,13 @@ export default function CustomersPage() {
               {totalOrders}
             </div>
 
-            <div style={{ color: "#64748b", fontSize: "12px", marginTop: 5 }}>
+            <div style={{ color: "#786f8b", fontSize: "12px", marginTop: 5 }}>
               All customer orders
             </div>
           </div>
 
           <div style={cardStyle}>
-            <div style={{ color: "#64748b", fontSize: "14px" }}>
+            <div style={{ color: "#786f8b", fontSize: "14px" }}>
               Customer Order Value
             </div>
 
@@ -712,13 +901,13 @@ export default function CustomersPage() {
               {money(totalRevenue)}
             </div>
 
-            <div style={{ color: "#64748b", fontSize: "12px", marginTop: 5 }}>
+            <div style={{ color: "#786f8b", fontSize: "12px", marginTop: 5 }}>
               Recorded customer order value
             </div>
           </div>
 
           <div style={cardStyle}>
-            <div style={{ color: "#64748b", fontSize: "14px" }}>
+            <div style={{ color: "#786f8b", fontSize: "14px" }}>
               VIP Customers
             </div>
 
@@ -733,13 +922,13 @@ export default function CustomersPage() {
               {vipCustomerCount}
             </div>
 
-            <div style={{ color: "#64748b", fontSize: "12px", marginTop: 5 }}>
+            <div style={{ color: "#786f8b", fontSize: "12px", marginTop: 5 }}>
               High-value customers
             </div>
           </div>
 
           <div style={cardStyle}>
-            <div style={{ color: "#64748b", fontSize: "14px" }}>
+            <div style={{ color: "#786f8b", fontSize: "14px" }}>
               Total Available Reward Points
             </div>
 
@@ -748,13 +937,13 @@ export default function CustomersPage() {
                 fontSize: "30px",
                 fontWeight: 800,
                 marginTop: "12px",
-                color: "#7c3aed",
+                color: "#6941b5",
               }}
             >
               ⭐ {totalRewardPoints}
             </div>
 
-            <div style={{ color: "#64748b", fontSize: "12px", marginTop: 5 }}>
+            <div style={{ color: "#786f8b", fontSize: "12px", marginTop: 5 }}>
               Points available across customers
             </div>
           </div>
@@ -780,7 +969,7 @@ export default function CustomersPage() {
                 style={{
                   margin: "7px 0 0",
                   fontSize: "13px",
-                  color: "#64748b",
+                  color: "#786f8b",
                 }}
               >
                 Showing {filteredCustomers.length} of {customers.length} customers
@@ -799,7 +988,7 @@ export default function CustomersPage() {
                 onChange={(e) => setCustomerFilter(e.target.value)}
                 style={{
                   padding: "12px 14px",
-                  border: "1px solid #dce3ed",
+                  border: "1px solid #e9e3f4",
                   borderRadius: "10px",
                   fontSize: "13px",
                   background: "#ffffff",
@@ -819,7 +1008,7 @@ export default function CustomersPage() {
                 style={{
                   width: "min(100%, 330px)",
                   padding: "12px 14px",
-                  border: "1px solid #dce3ed",
+                  border: "1px solid #e9e3f4",
                   borderRadius: "10px",
                   outline: "none",
                   fontSize: "13px",
@@ -834,7 +1023,7 @@ export default function CustomersPage() {
               style={{
                 padding: "60px 10px",
                 textAlign: "center",
-                color: "#64748b",
+                color: "#786f8b",
               }}
             >
               Loading customer information...
@@ -854,14 +1043,14 @@ export default function CustomersPage() {
               style={{
                 padding: "55px 10px",
                 textAlign: "center",
-                color: "#64748b",
+                color: "#786f8b",
               }}
             >
               <div style={{ fontSize: "38px", marginBottom: "12px" }}>
                 👥
               </div>
 
-              <h3 style={{ color: "#334155" }}>No Customers Found</h3>
+              <h3 style={{ color: "#211b35" }}>No Customers Found</h3>
 
               <p style={{ fontSize: "13px" }}>
                 Try changing your search or customer filter.
@@ -878,7 +1067,7 @@ export default function CustomersPage() {
                 }}
               >
                 <thead>
-                  <tr style={{ background: "#f8fafc" }}>
+                  <tr style={{ background: "#faf8ff" }}>
                     {[
                       "CUSTOMER",
                       "PHONE",
@@ -894,9 +1083,9 @@ export default function CustomersPage() {
                         style={{
                           padding: "15px 12px",
                           fontSize: "11px",
-                          color: "#64748b",
+                          color: "#786f8b",
                           fontWeight: 700,
-                          borderBottom: "1px solid #e8edf3",
+                          borderBottom: "1px solid #eeeaf7",
                           whiteSpace: "nowrap",
                         }}
                       >
@@ -910,7 +1099,7 @@ export default function CustomersPage() {
                   {filteredCustomers.map((customer, index) => (
                     <tr
                       key={customer.id}
-                      style={{ borderBottom: "1px solid #edf0f5" }}
+                      style={{ borderBottom: "1px solid #eeeaf7" }}
                     >
                       <td style={{ padding: "16px 12px" }}>
                         <div
@@ -925,8 +1114,8 @@ export default function CustomersPage() {
                               width: "38px",
                               height: "38px",
                               borderRadius: "50%",
-                              background: "#e8efff",
-                              color: "#315bd6",
+                              background: "#f1edff",
+                              color: "#7046c8",
                               display: "grid",
                               placeItems: "center",
                               fontWeight: 800,
@@ -943,7 +1132,7 @@ export default function CustomersPage() {
 
                             <div
                               style={{
-                                color: "#94a3b8",
+                                color: "#9b91ad",
                                 fontSize: "11px",
                                 marginTop: "4px",
                               }}
@@ -968,11 +1157,11 @@ export default function CustomersPage() {
                                     background:
                                       customer.totalOrders > 1
                                         ? "#dcfce7"
-                                        : "#eff6ff",
+                                        : "#f1edff",
                                     color:
                                       customer.totalOrders > 1
                                         ? "#15803d"
-                                        : "#2563eb",
+                                        : "#7046c8",
                                   }}
                                 >
                                   {customer.totalOrders > 1
@@ -1018,8 +1207,8 @@ export default function CustomersPage() {
                       <td style={{ padding: "16px 12px" }}>
                         <span
                           style={{
-                            background: "#eff6ff",
-                            color: "#2563eb",
+                            background: "#f1edff",
+                            color: "#7046c8",
                             borderRadius: "20px",
                             padding: "6px 11px",
                             fontSize: "12px",
@@ -1047,7 +1236,7 @@ export default function CustomersPage() {
                           padding: "16px 12px",
                           fontSize: "13px",
                           fontWeight: 800,
-                          color: "#7c3aed",
+                          color: "#6941b5",
                           whiteSpace: "nowrap",
                         }}
                       >
@@ -1058,7 +1247,7 @@ export default function CustomersPage() {
                         style={{
                           padding: "16px 12px",
                           fontSize: "12px",
-                          color: "#64748b",
+                          color: "#786f8b",
                           whiteSpace: "nowrap",
                         }}
                       >
@@ -1069,8 +1258,8 @@ export default function CustomersPage() {
                         <button
                           onClick={() => setSelectedCustomer(customer)}
                           style={{
-                            background: "#eef2ff",
-                            color: "#4f46e5",
+                            background: "#f1edff",
+                            color: "#6d45c5",
                             border: "none",
                             padding: "8px 12px",
                             borderRadius: "8px",
@@ -1096,7 +1285,7 @@ export default function CustomersPage() {
             style={{
               position: "fixed",
               inset: 0,
-              background: "rgba(15,23,42,0.55)",
+              background: "rgba(35,22,58,0.62)",
               zIndex: 1000,
               display: "flex",
               justifyContent: "center",
@@ -1143,7 +1332,7 @@ export default function CustomersPage() {
 
               <div
                 style={{
-                  background: "#f8fafc",
+                  background: "#faf8ff",
                   borderRadius: "13px",
                   padding: "18px",
                   marginTop: "20px",
@@ -1178,15 +1367,15 @@ export default function CustomersPage() {
                   )}
                 </div>
 
-                <p style={{ fontSize: "13px", color: "#475569" }}>
+                <p style={{ fontSize: "13px", color: "#625a73" }}>
                   Phone: {selectedCustomer.phone || "N/A"}
                 </p>
 
-                <p style={{ fontSize: "13px", color: "#475569" }}>
+                <p style={{ fontSize: "13px", color: "#625a73" }}>
                   District: {selectedCustomer.district || "N/A"}
                 </p>
 
-                <p style={{ fontSize: "13px", color: "#475569" }}>
+                <p style={{ fontSize: "13px", color: "#625a73" }}>
                   Address: {selectedCustomer.address || "N/A"}
                 </p>
 
@@ -1199,7 +1388,7 @@ export default function CustomersPage() {
                   }}
                 >
                   <div>
-                    <div style={{ color: "#64748b", fontSize: "12px" }}>
+                    <div style={{ color: "#786f8b", fontSize: "12px" }}>
                       Total Orders
                     </div>
 
@@ -1209,7 +1398,7 @@ export default function CustomersPage() {
                   </div>
 
                   <div>
-                    <div style={{ color: "#64748b", fontSize: "12px" }}>
+                    <div style={{ color: "#786f8b", fontSize: "12px" }}>
                       Total Order Value
                     </div>
 
@@ -1219,7 +1408,7 @@ export default function CustomersPage() {
                   </div>
 
                   <div>
-                    <div style={{ color: "#64748b", fontSize: "12px" }}>
+                    <div style={{ color: "#786f8b", fontSize: "12px" }}>
                       Available Reward Points
                     </div>
 
@@ -1227,7 +1416,7 @@ export default function CustomersPage() {
                       ⭐ {selectedCustomer.rewardPoints}
                     </strong>
 
-                    <div style={{ fontSize: "11px", color: "#64748b" }}>
+                    <div style={{ fontSize: "11px", color: "#786f8b" }}>
                       Lifetime Earned:{" "}
                       {selectedCustomer.totalRewardPointsEarned}
                     </div>
@@ -1235,13 +1424,213 @@ export default function CustomersPage() {
                 </div>
               </div>
 
+              <section
+                style={{
+                  marginTop: "25px",
+                  border: "1px solid #eeeaf7",
+                  borderRadius: "13px",
+                  padding: "16px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "10px",
+                    flexWrap: "wrap",
+                    marginBottom: "14px",
+                  }}
+                >
+                  <h3 style={{ fontSize: "16px", margin: 0 }}>
+                    ⭐ Reward Transaction History
+                  </h3>
+
+                  <span style={{ fontSize: "11px", color: "#786f8b" }}>
+                    {rewardTransactions.length} transactions loaded
+                  </span>
+                </div>
+
+                {!selectedCustomer.customerId ? (
+                  <p style={{ color: "#786f8b", fontSize: "13px" }}>
+                    Reward history is unavailable for this customer record.
+                  </p>
+                ) : rewardHistoryLoading ? (
+                  <p style={{ color: "#786f8b", fontSize: "13px" }}>
+                    Loading reward transactions...
+                  </p>
+                ) : rewardHistoryError && rewardTransactions.length === 0 ? (
+                  <div
+                    style={{
+                      background: "#fef2f2",
+                      color: "#b91c1c",
+                      borderRadius: "9px",
+                      padding: "12px",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {rewardHistoryError}
+                    <div style={{ marginTop: "6px", fontSize: "11px" }}>
+                      Close and reopen Customer Details to try again.
+                    </div>
+                  </div>
+                ) : rewardTransactions.length === 0 ? (
+                  <p style={{ color: "#786f8b", fontSize: "13px" }}>
+                    No reward transactions found for this customer.
+                  </p>
+                ) : (
+                  <>
+                    {rewardHistoryError && (
+                      <p style={{ color: "#b91c1c", background: "#fef2f2", padding: "10px", borderRadius: "8px", fontSize: "12px" }}>
+                        {rewardHistoryError}
+                      </p>
+                    )}
+                    <div style={{ display: "grid", gap: "10px" }}>
+                    {rewardTransactions.map((transaction) => {
+                      const labels = {
+                        earn: "Points Earned",
+                        redeem: "Points Redeemed",
+                        reverse: "Points Reversed",
+                        refund: "Points Refunded",
+                      };
+
+                      const colors = {
+                        earn: "#15803d",
+                        redeem: "#b45309",
+                        reverse: "#dc2626",
+                        refund: "#7046c8",
+                      };
+
+                      const createdDate = transaction.createdAt
+                        ? new Date(transaction.createdAt)
+                        : null;
+
+                      return (
+                        <div
+                          key={transaction.id}
+                          style={{
+                            border: "1px solid #eeeaf7",
+                            borderRadius: "10px",
+                            padding: "12px",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            gap: "12px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div
+                              style={{
+                                color: colors[transaction.type],
+                                fontSize: "13px",
+                                fontWeight: 800,
+                              }}
+                            >
+                              {labels[transaction.type]}
+                            </div>
+
+                            <p
+                              style={{
+                                margin: "5px 0",
+                                color: "#625a73",
+                                fontSize: "12px",
+                              }}
+                            >
+                              {transaction.description || "Reward transaction"}
+                            </p>
+
+                            {transaction.orderNumber && (
+                              <div
+                                style={{
+                                  color: "#786f8b",
+                                  fontSize: "11px",
+                                }}
+                              >
+                                Order: {transaction.orderNumber}
+                              </div>
+                            )}
+
+                            <div
+                              style={{
+                                color: "#9b91ad",
+                                fontSize: "11px",
+                                marginTop: "5px",
+                              }}
+                            >
+                              {createdDate &&
+                              !Number.isNaN(createdDate.getTime())
+                                ? createdDate.toLocaleString("en-BD", {
+                                    dateStyle: "medium",
+                                    timeStyle: "short",
+                                  })
+                                : "Date unavailable"}
+                            </div>
+                          </div>
+
+                          <div style={{ textAlign: "right" }}>
+                            <strong
+                              style={{
+                                color: colors[transaction.type],
+                                fontSize: "15px",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {transaction.points > 0 ? "+" : ""}
+                              {transaction.points} pts
+                            </strong>
+
+                            {transaction.discount > 0 && (
+                              <div
+                                style={{
+                                  color: "#786f8b",
+                                  fontSize: "11px",
+                                  marginTop: "4px",
+                                }}
+                              >
+                                Discount: {money(transaction.discount)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    </div>
+                  </>
+                )}
+
+                {rewardHistoryHasMore && !rewardHistoryLoading && (
+                  <button
+                    type="button"
+                    onClick={handleLoadMoreRewardHistory}
+                    disabled={rewardHistoryLoadingMore}
+                    style={{
+                      width: "100%",
+                      marginTop: "14px",
+                      padding: "11px",
+                      border: "1px solid #ded2f5",
+                      borderRadius: "9px",
+                      background: "#f3efff",
+                      color: "#6941b5",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      cursor: rewardHistoryLoadingMore ? "wait" : "pointer",
+                      opacity: rewardHistoryLoadingMore ? 0.6 : 1,
+                    }}
+                  >
+                    {rewardHistoryLoadingMore
+                      ? "Loading..."
+                      : "Load More Transactions"}
+                  </button>
+                )}
+              </section>
               <h3 style={{ fontSize: "16px", marginTop: "25px" }}>
                 Order History
               </h3>
 
               <div style={{ display: "grid", gap: "12px" }}>
                 {selectedCustomer.orders.length === 0 ? (
-                  <p style={{ color: "#64748b", fontSize: "13px" }}>
+                  <p style={{ color: "#786f8b", fontSize: "13px" }}>
                     No order history available.
                   </p>
                 ) : (
@@ -1249,7 +1638,7 @@ export default function CustomersPage() {
                     <div
                       key={order.id || index}
                       style={{
-                        border: "1px solid #e8edf3",
+                        border: "1px solid #eeeaf7",
                         borderRadius: "11px",
                         padding: "14px",
                       }}
@@ -1274,13 +1663,13 @@ export default function CustomersPage() {
                                 ? "#fee2e2"
                                 : order.status === "Delivered"
                                   ? "#dcfce7"
-                                  : "#eff6ff",
+                                  : "#f1edff",
                             color:
                               order.status === "Cancelled"
                                 ? "#dc2626"
                                 : order.status === "Delivered"
                                   ? "#15803d"
-                                  : "#2563eb",
+                                  : "#7046c8",
                             padding: "5px 9px",
                             borderRadius: "20px",
                             fontWeight: 700,
@@ -1292,7 +1681,7 @@ export default function CustomersPage() {
 
                       <div
                         style={{
-                          color: "#64748b",
+                          color: "#786f8b",
                           fontSize: "12px",
                           marginTop: "9px",
                         }}

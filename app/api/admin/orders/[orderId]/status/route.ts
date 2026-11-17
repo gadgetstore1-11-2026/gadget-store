@@ -35,7 +35,7 @@ export async function PATCH(
     }
 
     const token = authorization.substring(7);
-    const decodedToken = await adminAuth.verifyIdToken(token);
+    const decodedToken = await adminAuth.verifyIdToken(token, true);
 
     if (decodedToken.uid !== ADMIN_UID) {
       return NextResponse.json(
@@ -64,6 +64,9 @@ export async function PATCH(
     const rewardLedgerRef = adminDb
       .collection("rewardTransactions")
       .doc();
+    const refundLedgerRef = adminDb
+      .collection("rewardTransactions")
+      .doc(`${orderId}_refund`);
 
     await adminDb.runTransaction(async (transaction) => {
       const orderSnapshot = await transaction.get(orderRef);
@@ -74,12 +77,32 @@ export async function PATCH(
 
       const order = orderSnapshot.data()!;
       const currentStatus = order.status;
+      if (newStatus === "Confirmed") {
+        const paymentChoice = order.paymentChoice;
+        const advanceVerified = order.paymentStatus === "Verified";
+        const laterApproved = order.deliveryChargeLaterStatus === "Approved";
+        if (paymentChoice === "full" && !advanceVerified) throw new Error("Full payment must be verified before confirming this order.");
+        if (paymentChoice === "delivery" && Number(order.deliveryCharge || 0) > 0 && !advanceVerified) throw new Error("Delivery charge payment must be verified before confirming this order.");
+        if (paymentChoice === "request_later" && !laterApproved) throw new Error("Admin approval is required before confirming this order.");
+      }
       const stockDeducted = order.stockDeducted === true;
       const pointsAlreadyAwarded =
         order.rewardPointsAwarded === true;
 
       if (currentStatus === newStatus) {
         return;
+      }
+
+      const allowedTransitions: Record<string, readonly string[]> = {
+        Pending: ["Confirmed", "Cancelled"],
+        Confirmed: ["Shipped", "Cancelled"],
+        Shipped: ["Delivered"],
+        Delivered: ["Shipped"],
+        Cancelled: [],
+      };
+
+      if (!allowedTransitions[currentStatus]?.includes(newStatus)) {
+        throw new Error("Invalid order status transition.");
       }
 
       const shouldDeduct =
@@ -96,6 +119,22 @@ export async function PATCH(
         currentStatus === "Delivered" &&
         newStatus !== "Delivered" &&
         pointsAlreadyAwarded;
+
+      const redeemedPointsUsed = Number(order.rewardPointsUsed ?? 0);
+
+      if (
+        newStatus === "Cancelled" &&
+        (!Number.isSafeInteger(redeemedPointsUsed) ||
+          redeemedPointsUsed < 0 ||
+          redeemedPointsUsed % 100 !== 0)
+      ) {
+        throw new Error("Invalid redeemed reward points.");
+      }
+
+      const shouldRefundRedeemedPoints =
+        newStatus === "Cancelled" &&
+        redeemedPointsUsed > 0 &&
+        order.rewardPointsRefunded !== true;
 
       // Calculate reward points after reward discount.
       const subtotal = Number(order.subtotal);
@@ -126,7 +165,11 @@ export async function PATCH(
         | FirebaseFirestore.DocumentSnapshot
         | null = null;
 
-      if (shouldAwardPoints || shouldReversePoints) {
+      if (
+        shouldAwardPoints ||
+        shouldReversePoints ||
+        shouldRefundRedeemedPoints
+      ) {
         let customerId = String(order.customerId || "");
 
         // Support older orders that do not contain customerId.
@@ -254,27 +297,44 @@ export async function PATCH(
       if (
         customerRef &&
         customerSnapshot?.exists &&
-        (shouldAwardPoints || shouldReversePoints)
+        (shouldAwardPoints ||
+          shouldReversePoints ||
+          shouldRefundRedeemedPoints)
       ) {
         const customer = customerSnapshot.data()!;
 
-        const currentPoints = Math.max(
-          0,
-          Number(customer.rewardPoints || 0)
+        const currentPoints = Number(customer.rewardPoints ?? 0);
+        const currentLifetimePoints = Number(
+          customer.totalRewardPointsEarned ?? 0
         );
 
-        const currentLifetimePoints = Math.max(
-          0,
-          Number(customer.totalRewardPointsEarned || 0)
-        );
+        if (
+          !Number.isSafeInteger(currentPoints) ||
+          currentPoints < 0
+        ) {
+          throw new Error("Invalid customer reward points balance.");
+        }
+
+        if (
+          shouldAwardPoints &&
+          (!Number.isSafeInteger(currentLifetimePoints) ||
+            currentLifetimePoints < 0)
+        ) {
+          throw new Error("Invalid customer lifetime reward points.");
+        }
+
+        let updatedPoints = currentPoints;
+        const customerUpdates: Record<string, unknown> = {};
 
         if (shouldAwardPoints) {
-          transaction.update(customerRef, {
-            rewardPoints: currentPoints + rewardPoints,
-            totalRewardPointsEarned:
-              currentLifetimePoints + rewardPoints,
-            updatedAt: FieldValue.serverTimestamp(),
-          });
+          updatedPoints += rewardPoints;
+
+          customerUpdates.totalRewardPointsEarned =
+            currentLifetimePoints + rewardPoints;
+        }
+
+        if (shouldRefundRedeemedPoints) {
+          updatedPoints += redeemedPointsUsed;
         }
 
         if (shouldReversePoints) {
@@ -287,17 +347,23 @@ export async function PATCH(
             throw new Error("Invalid previously earned reward points.");
           }
 
-          if (currentPoints < previouslyEarned) {
+          if (updatedPoints < previouslyEarned) {
             throw new Error(
               "Cannot cancel this delivered order because the customer has already redeemed some of its reward points."
             );
           }
 
-          transaction.update(customerRef, {
-            rewardPoints: currentPoints - previouslyEarned,
-            updatedAt: FieldValue.serverTimestamp(),
-          });
+          updatedPoints -= previouslyEarned;
         }
+
+        if (!Number.isSafeInteger(updatedPoints)) {
+          throw new Error("Updated customer reward points are invalid.");
+        }
+
+        customerUpdates.rewardPoints = updatedPoints;
+        customerUpdates.updatedAt = FieldValue.serverTimestamp();
+
+        transaction.update(customerRef, customerUpdates);
       }
 
       // Record reward points in the transaction ledger.
@@ -335,6 +401,22 @@ export async function PATCH(
         });
       }
 
+      if (
+        customerRef &&
+        customerSnapshot?.exists &&
+        shouldRefundRedeemedPoints
+      ) {
+        transaction.create(refundLedgerRef, {
+          customerId: customerRef.id,
+          orderId,
+          orderNumber: String(order.orderNumber || ""),
+          type: "refund",
+          points: redeemedPointsUsed,
+          description: "Redeemed points refunded after order cancellation",
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      }
+
       // Update order status and reward history.
       transaction.update(orderRef, {
         status: newStatus,
@@ -354,6 +436,13 @@ export async function PATCH(
           ? {
               rewardPointsAwarded: false,
               rewardPointsReversedAt: FieldValue.serverTimestamp(),
+            }
+          : {}),
+
+        ...(shouldRefundRedeemedPoints
+          ? {
+              rewardPointsRefunded: true,
+              rewardPointsRefundedAt: FieldValue.serverTimestamp(),
             }
           : {}),
 

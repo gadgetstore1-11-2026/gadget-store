@@ -39,13 +39,22 @@ export default function InventoryPage() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
+    let unsubscribeProducts: (() => void) | null = null;
+
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      unsubscribeProducts?.();
+      unsubscribeProducts = null;
+
       if (!user || user.uid !== ADMIN_UID) {
+        setProducts([]);
+        setLoading(false);
         router.replace("/admin/orders/login");
         return;
       }
 
-      const unsubscribeProducts = onSnapshot(
+      setLoading(true);
+
+      unsubscribeProducts = onSnapshot(
         collection(db, "products"),
         (snapshot) => {
           const list = snapshot.docs.map((item) => {
@@ -71,11 +80,12 @@ export default function InventoryPage() {
           setLoading(false);
         }
       );
-
-      return () => unsubscribeProducts();
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      unsubscribeProducts?.();
+    };
   }, [router]);
 
   const stats = useMemo(() => {
@@ -415,7 +425,7 @@ function StatCard({
       <div
         style={{
           ...styles.statDot,
-          background: danger ? "#dc2626" : warning ? "#d97706" : "#2563eb",
+          background: danger ? "#dc2626" : warning ? "#d97706" : "#7654d6",
         }}
       />
       <p style={styles.statLabel}>{label}</p>
@@ -428,9 +438,9 @@ function StatCard({
 const styles: Record<string, CSSProperties> = {
   page: {
     minHeight: "100vh",
-    background: "#f5f7fb",
-    padding: "36px 20px",
-    color: "#172033",
+    background: "#f7f6fc",
+    padding: "clamp(18px, 3vw, 32px) 20px",
+    color: "#211b35",
   },
   container: {
     maxWidth: 1450,
@@ -451,19 +461,19 @@ const styles: Record<string, CSSProperties> = {
     marginBottom: 28,
   },
   eyebrow: {
-    color: "#2563eb",
+    color: "#7654d6",
     fontSize: 12,
     fontWeight: 800,
     letterSpacing: 2,
     margin: "0 0 8px",
   },
   title: {
-    fontSize: 30,
+    fontSize: 32,
     fontWeight: 800,
     margin: 0,
   },
   subtitle: {
-    color: "#64748b",
+    color: "#746b86",
     margin: "8px 0 0",
   },
   headerButtons: {
@@ -474,18 +484,18 @@ const styles: Record<string, CSSProperties> = {
   secondaryButton: {
     textDecoration: "none",
     background: "#fff",
-    border: "1px solid #dbe2ec",
+    border: "1px solid #e8e1f5",
     padding: "11px 16px",
-    borderRadius: 9,
+    borderRadius: 11,
     color: "#263449",
     fontWeight: 700,
     fontSize: 13,
   },
   message: {
-    background: "#eff6ff",
-    color: "#1d4ed8",
+    background: "#f1edff",
+    color: "#6544c5",
     padding: 14,
-    borderRadius: 10,
+    borderRadius: 12,
     marginBottom: 20,
     fontWeight: 600,
   },
@@ -497,10 +507,10 @@ const styles: Record<string, CSSProperties> = {
   },
   statCard: {
     background: "#fff",
-    border: "1px solid #e7ebf2",
-    borderRadius: 14,
-    padding: 20,
-    boxShadow: "0 3px 12px rgba(15,23,42,.03)",
+    border: "1px solid #eeeaf7",
+    borderRadius: 18,
+    padding: 23,
+    boxShadow: "0 8px 28px rgba(91,58,155,0.07)",
   },
   statDot: {
     width: 9,
@@ -509,58 +519,58 @@ const styles: Record<string, CSSProperties> = {
     marginBottom: 14,
   },
   statLabel: {
-    color: "#64748b",
+    color: "#746b86",
     fontSize: 13,
     margin: 0,
   },
   statValue: {
-    fontSize: 30,
+    fontSize: 32,
     margin: "8px 0",
     fontWeight: 800,
   },
   statDetail: {
-    color: "#94a3b8",
+    color: "#a49bb5",
     fontSize: 12,
     margin: 0,
   },
   valueCard: {
-    background: "#172554",
+    background: "#30205a",
     color: "#fff",
-    borderRadius: 15,
-    padding: "23px 26px",
+    borderRadius: 18,
+    padding: "28px 30px",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 22,
   },
   valueLabel: {
-    color: "#bfdbfe",
+    color: "#d9ccff",
     margin: 0,
     fontSize: 13,
   },
   valueAmount: {
-    fontSize: 30,
+    fontSize: 32,
     margin: "8px 0",
   },
   valueHint: {
-    color: "#cbd5e1",
+    color: "#ded6ef",
     fontSize: 12,
     margin: 0,
   },
   valueIcon: {
     fontSize: 42,
     fontWeight: 800,
-    color: "#93c5fd",
+    color: "#c5adff",
     padding: 10,
   },
   panel: {
     background: "#fff",
-    border: "1px solid #e7ebf2",
-    borderRadius: 15,
+    border: "1px solid #eeeaf7",
+    borderRadius: 18,
     overflow: "hidden",
   },
   panelHeader: {
-    padding: "22px 22px 16px",
+    padding: "25px 24px 18px",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
@@ -572,36 +582,36 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 19,
   },
   panelSubtitle: {
-    color: "#64748b",
+    color: "#746b86",
     fontSize: 12,
     margin: "6px 0 0",
   },
   productCount: {
-    background: "#eff6ff",
-    color: "#1d4ed8",
+    background: "#f1edff",
+    color: "#6544c5",
     padding: "7px 11px",
-    borderRadius: 20,
+    borderRadius: 8,
     fontSize: 12,
     fontWeight: 700,
   },
   toolbar: {
     display: "flex",
     gap: 12,
-    padding: "0 22px 18px",
+    padding: "0 24px 20px",
     flexWrap: "wrap",
   },
   search: {
     flex: "1 1 260px",
     minWidth: 0,
-    border: "1px solid #dbe2ec",
-    borderRadius: 9,
-    padding: "12px 14px",
+    border: "1px solid #e8e1f5",
+    borderRadius: 11,
+    padding: "13px 15px",
     fontSize: 13,
   },
   select: {
-    border: "1px solid #dbe2ec",
-    borderRadius: 9,
-    padding: "12px 14px",
+    border: "1px solid #e8e1f5",
+    borderRadius: 11,
+    padding: "13px 15px",
     background: "#fff",
     minWidth: 150,
   },
@@ -615,19 +625,19 @@ const styles: Record<string, CSSProperties> = {
     minWidth: 900,
   },
   th: {
-    background: "#f8fafc",
-    color: "#64748b",
+    background: "#faf9fd",
+    color: "#746b86",
     textAlign: "left",
-    padding: "13px 16px",
+    padding: "15px 17px",
     fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: ".5px",
-    borderTop: "1px solid #edf0f5",
-    borderBottom: "1px solid #edf0f5",
+    borderTop: "1px solid #f0edf7",
+    borderBottom: "1px solid #f0edf7",
   },
   td: {
-    padding: "14px 16px",
-    borderBottom: "1px solid #edf0f5",
+    padding: "16px 17px",
+    borderBottom: "1px solid #f0edf7",
     fontSize: 13,
     whiteSpace: "nowrap",
   },
@@ -638,39 +648,39 @@ const styles: Record<string, CSSProperties> = {
     minWidth: 190,
   },
   productImage: {
-    width: 42,
-    height: 42,
+    width: 46,
+    height: 46,
     objectFit: "cover",
-    borderRadius: 8,
-    background: "#f1f5f9",
+    borderRadius: 11,
+    background: "#f3effb",
   },
   imagePlaceholder: {
-    width: 42,
-    height: 42,
-    borderRadius: 8,
-    background: "#f1f5f9",
+    width: 46,
+    height: 46,
+    borderRadius: 11,
+    background: "#f3effb",
     display: "grid",
     placeItems: "center",
     fontSize: 20,
   },
   badge: {
     display: "inline-block",
-    borderRadius: 20,
-    padding: "6px 9px",
+    borderRadius: 8,
+    padding: "7px 11px",
     fontSize: 11,
     fontWeight: 700,
   },
   successBadge: {
-    background: "#dcfce7",
-    color: "#15803d",
+    background: "#e8f8ef",
+    color: "#16834a",
   },
   warningBadge: {
-    background: "#fef3c7",
-    color: "#b45309",
+    background: "#fff5df",
+    color: "#a96512",
   },
   dangerBadge: {
-    background: "#fee2e2",
-    color: "#b91c1c",
+    background: "#fff0f0",
+    color: "#c24141",
   },
   updateCell: {
     display: "flex",
@@ -678,14 +688,14 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
   },
   stockInput: {
-    width: 75,
+    width: 82,
     padding: "8px",
-    border: "1px solid #dbe2ec",
+    border: "1px solid #e8e1f5",
     borderRadius: 7,
   },
   saveButton: {
     border: 0,
-    background: "#2563eb",
+    background: "linear-gradient(135deg, #7654d6, #5436a8)",
     color: "#fff",
     padding: "9px 12px",
     borderRadius: 7,
@@ -695,11 +705,11 @@ const styles: Record<string, CSSProperties> = {
   empty: {
     textAlign: "center",
     padding: 35,
-    color: "#64748b",
+    color: "#746b86",
   },
   footer: {
     textAlign: "center",
-    color: "#94a3b8",
+    color: "#a49bb5",
     fontSize: 12,
     padding: 22,
   },

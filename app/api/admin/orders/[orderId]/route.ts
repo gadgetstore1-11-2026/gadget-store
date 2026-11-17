@@ -1,4 +1,5 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebase-admin";
 
@@ -24,9 +25,7 @@ export async function DELETE(
       );
     }
 
-    const decoded = await adminAuth.verifyIdToken(
-      authorization.substring(7)
-    );
+    const decoded = await adminAuth.verifyIdToken(authorization.substring(7), true);
 
     if (decoded.uid !== ADMIN_UID) {
       return NextResponse.json(
@@ -54,6 +53,72 @@ export async function DELETE(
       }
 
       const order = orderSnapshot.data()!;
+
+      if (!["Pending", "Cancelled"].includes(String(order.status))) {
+        throw new Error(
+          "Only Pending or Cancelled orders can be deleted."
+        );
+      }
+
+      if (
+        order.rewardPointsAwarded === true ||
+        order.rewardPointsReversedAt
+      ) {
+        throw new Error(
+          "Cannot delete an order with reward points history."
+        );
+      }
+
+      const redeemedPointsUsed = Number(order.rewardPointsUsed ?? 0);
+      const shouldRefundRedeemedPoints =
+        redeemedPointsUsed > 0 && order.rewardPointsRefunded !== true;
+
+      if (
+        !Number.isSafeInteger(redeemedPointsUsed) ||
+        redeemedPointsUsed < 0 ||
+        redeemedPointsUsed % 100 !== 0
+      ) {
+        throw new Error("Invalid redeemed reward points.");
+      }
+
+      let refundCustomerRef:
+        | FirebaseFirestore.DocumentReference
+        | null = null;
+      let refundCustomerSnapshot:
+        | FirebaseFirestore.DocumentSnapshot
+        | null = null;
+
+      if (shouldRefundRedeemedPoints) {
+        let customerId = String(order.customerId || "");
+
+        if (!customerId) {
+          const phone = String(order.customer?.phone || "").trim();
+          if (!/^01[3-9]\d{8}$/.test(phone)) {
+            throw new Error("Customer information is missing for reward refund.");
+          }
+          customerId = createHash("sha256").update(phone).digest("hex");
+        }
+
+        if (customerId.includes("/")) {
+          throw new Error("Invalid customer ID.");
+        }
+
+        refundCustomerRef = adminDb.collection("customers").doc(customerId);
+        refundCustomerSnapshot = await transaction.get(refundCustomerRef);
+
+        if (!refundCustomerSnapshot.exists) {
+          throw new Error("Customer record not found for reward refund.");
+        }
+
+        const currentPoints = refundCustomerSnapshot.data()?.rewardPoints;
+        if (
+          !Number.isSafeInteger(currentPoints) ||
+          currentPoints < 0 ||
+          !Number.isSafeInteger(currentPoints + redeemedPointsUsed)
+        ) {
+          throw new Error("Invalid customer reward points balance.");
+        }
+      }
 
       if (order.stockDeducted === true) {
         if (!Array.isArray(order.items) || order.items.length === 0) {
@@ -117,6 +182,32 @@ export async function DELETE(
             updatedAt: FieldValue.serverTimestamp(),
           });
         }
+      }
+
+      if (
+        shouldRefundRedeemedPoints &&
+        refundCustomerRef &&
+        refundCustomerSnapshot?.exists
+      ) {
+        const currentPoints = refundCustomerSnapshot.data()!.rewardPoints;
+
+        transaction.update(refundCustomerRef, {
+          rewardPoints: currentPoints + redeemedPointsUsed,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        transaction.create(
+          adminDb.collection("rewardTransactions").doc(`${orderId}_refund`),
+          {
+            customerId: refundCustomerRef.id,
+            orderId,
+            orderNumber: String(order.orderNumber || ""),
+            type: "refund",
+            points: redeemedPointsUsed,
+            description: "Redeemed points refunded after order deletion",
+            createdAt: FieldValue.serverTimestamp(),
+          }
+        );
       }
 
       transaction.delete(orderRef);

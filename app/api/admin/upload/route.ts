@@ -23,7 +23,7 @@ if (!authorization?.startsWith("Bearer ")) {
 }
 
 const token = authorization.substring(7);
-const decodedToken = await adminAuth.verifyIdToken(token);
+const decodedToken = await adminAuth.verifyIdToken(token, true);
 
 if (decodedToken.uid !== "MiCPapmVpcggbMozz8eV45jI7pX2") {
   return NextResponse.json(
@@ -34,6 +34,23 @@ if (decodedToken.uid !== "MiCPapmVpcggbMozz8eV45jI7pX2") {
 
 const formData = await request.formData();
 const file = formData.get("image");
+const requestedFolder = formData.get("folder");
+const allowedFolders: Record<string, string> = {
+  products: "gadget-store/products",
+  categories: "gadget-store/categories",
+  homepage: "gadget-store/homepage",
+  "fresh-shelf": "gadget-store/fresh-shelf",
+  store: "gadget-store/store",
+};
+const folderKey = typeof requestedFolder === "string" ? requestedFolder : "products";
+const uploadFolder = allowedFolders[folderKey];
+
+if (!uploadFolder) {
+  return NextResponse.json(
+    { error: "Invalid upload folder." },
+    { status: 400 }
+  );
+}
 
 if (!(file instanceof File)) {
   return NextResponse.json(
@@ -69,7 +86,7 @@ const buffer = Buffer.from(bytes);
 const result = await new Promise<UploadApiResponse>((resolve, reject) => {
   cloudinary.uploader.upload_stream(
     {
-      folder: "gadget-store/products",
+      folder: uploadFolder,
       resource_type: "image",
     },
     (error, result) => {

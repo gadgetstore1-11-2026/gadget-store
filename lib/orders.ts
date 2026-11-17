@@ -9,6 +9,7 @@ import {
 import type { Unsubscribe } from "firebase/firestore";
 
 import { auth, db } from "@/lib/firebase";
+import { normalizePhone, isValidBangladeshPhone } from "@/lib/customer-auth";
 
 export type OrderStatus =
   | "Pending"
@@ -54,6 +55,8 @@ export type Order = {
   deliveryCharge: number;
   rewardPointsUsed?: number;
   rewardDiscount?: number;
+  couponCode?: string;
+  couponDiscount?: number;
   total: number;
   paymentMethod: string;
   createdAt: string;
@@ -75,6 +78,11 @@ export type PlaceOrderResponse = {
 export async function createOrder(
   order: Pick<Order, "customer" | "items"> & {
     redeemPoints?: number;
+    couponCode?: string;
+    paymentMethod?: "bKash" | "Nagad";
+    paymentChoice?: "delivery" | "full" | "request_later";
+    transactionId?: string;
+    senderNumber?: string;
   }
 ): Promise<PlaceOrderResponse> {
   const headers: Record<string, string> = {
@@ -94,11 +102,14 @@ export async function createOrder(
       -customerEmailSuffix.length
     );
 
-    if (!/^01[3-9]\d{8}$/.test(accountPhone)) {
+    const normalizedAccountPhone = normalizePhone(accountPhone);
+    const normalizedCheckoutPhone = normalizePhone(order.customer.phone);
+
+    if (!isValidBangladeshPhone(normalizedAccountPhone)) {
       throw new Error("Invalid customer account.");
     }
 
-    if (accountPhone !== order.customer.phone.trim()) {
+    if (normalizedAccountPhone !== normalizedCheckoutPhone) {
       throw new Error(
         "Checkout phone number must match your customer account."
       );
@@ -108,10 +119,18 @@ export async function createOrder(
     headers.Authorization = `Bearer ${token}`;
   }
 
+  const normalizedOrder = {
+    ...order,
+    customer: {
+      ...order.customer,
+      phone: normalizePhone(order.customer.phone),
+    },
+  };
+
   const response = await fetch("/api/orders", {
     method: "POST",
     headers,
-    body: JSON.stringify(order),
+    body: JSON.stringify(normalizedOrder),
   });
 
   const result = await response.json();

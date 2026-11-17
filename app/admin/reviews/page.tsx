@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
@@ -79,36 +79,123 @@ export default function ReviewsPage() {
   const [actionLoading, setActionLoading] = useState("");
   const [notice, setNotice] = useState("");
 
-  const loadReviews = useCallback(async () => {
-    const user = auth.currentUser;
+  const [page, setPage] = useState(1);
+  const [pageCursor, setPageCursor] = useState<Record<number, string | null>>({ 1: null });
+  const [hasMore, setHasMore] = useState(false);
+  const [totalReviews, setTotalReviews] = useState(0);
+  const [serverStats, setServerStats] = useState({
+    total: 0,
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+    averageRating: 0,
+  });
 
-    if (!user || user.uid !== ADMIN_UID) {
-      throw new Error("Admin authentication required.");
+  const loadReviews = useCallback(
+    async (
+      targetPage: number,
+      targetCursor: string | null,
+      searchValue: string,
+      statusValue: string
+    ) => {
+      const user = auth.currentUser;
+
+      if (!user || user.uid !== ADMIN_UID) {
+        throw new Error("Admin authentication required.");
+      }
+
+      const token = await user.getIdToken();
+      const params = new URLSearchParams({
+        pageSize: "20",
+        page: String(targetPage),
+        status: statusValue,
+      });
+
+      if (searchValue.trim()) {
+        params.set("search", searchValue.trim());
+      }
+
+      if (targetCursor) {
+        params.set("cursor", targetCursor);
+      }
+
+      const response = await fetch(
+        `/api/admin/reviews?${params.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          cache: "no-store",
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "Unable to load reviews.");
+      }
+
+      setReviews(data.reviews || []);
+      setPage(targetPage);
+      setTotalReviews(Number(data.total || 0));
+      setHasMore(Boolean(data.hasMore));
+
+      setServerStats({
+        total: Number(data.stats?.total || 0),
+        pending: Number(data.stats?.pending || 0),
+        approved: Number(data.stats?.approved || 0),
+        rejected: Number(data.stats?.rejected || 0),
+        averageRating: Number(data.stats?.averageRating || 0),
+      });
+
+      setPageCursor((current) => {
+        const next: Record<number, string | null> =
+          targetPage === 1 ? { 1: null } : { ...current };
+
+        if (data.nextCursor) {
+          next[targetPage + 1] = data.nextCursor;
+        } else {
+          delete next[targetPage + 1];
+        }
+
+        Object.keys(next).forEach((key) => {
+          if (Number(key) > targetPage + 1) {
+            delete next[Number(key)];
+          }
+        });
+
+        return next;
+      });
+    },
+    []
+  );
+
+  const goToPage = async (targetPage: number) => {
+    try {
+      setLoading(true);
+      setError("");
+
+      await loadReviews(
+        targetPage,
+        pageCursor[targetPage] || null,
+        search,
+        filter
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to load reviews."
+      );
+    } finally {
+      setLoading(false);
     }
-
-    const token = await user.getIdToken();
-
-    const response = await fetch("/api/admin/reviews", {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-    });
-
-    const data = await response.json();
-
-    if (!response.ok || !data.success) {
-      throw new Error(data.message || "Unable to load reviews.");
-    }
-
-    setReviews(data.reviews || []);
-  }, []);
+  };
 
   useEffect(() => {
     let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!active) return;
 
       if (!user) {
@@ -122,48 +209,36 @@ export default function ReviewsPage() {
         return;
       }
 
-      try {
-        setLoading(true);
-        setError("");
+      timer = setTimeout(async () => {
+        if (!active) return;
 
-        const token = await user.getIdToken();
+        try {
+          setLoading(true);
+          setError("");
 
-        const response = await fetch("/api/admin/reviews", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
-        });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.success) {
-          throw new Error(data.message || "Unable to load reviews.");
+          await loadReviews(1, null, search, filter);
+        } catch (err) {
+          if (active) {
+            setError(
+              err instanceof Error
+                ? err.message
+                : "Unable to load reviews."
+            );
+          }
+        } finally {
+          if (active) setLoading(false);
         }
-
-        if (active) {
-          setReviews(data.reviews || []);
-        }
-      } catch (err) {
-        if (active) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Unable to load reviews."
-          );
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
+      }, 300);
     });
 
     return () => {
       active = false;
+
+      if (timer) clearTimeout(timer);
+
       unsubscribe();
     };
-  }, [router]);
-
-  const updateReview = async (
+  }, [router, search, filter, loadReviews]);  const updateReview = async (
     reviewId: string,
     status: string
   ) => {
@@ -198,7 +273,7 @@ export default function ReviewsPage() {
         throw new Error(data.message || "Unable to update review.");
       }
 
-      await loadReviews();
+      await loadReviews(page, pageCursor[page] || null, search, filter);
 
       setNotice(data.message || "Review updated successfully.");
     } catch (err) {
@@ -246,7 +321,7 @@ export default function ReviewsPage() {
         throw new Error(data.message || "Unable to delete review.");
       }
 
-      await loadReviews();
+      await loadReviews(page, pageCursor[page] || null, search, filter);
 
       setNotice("Review deleted successfully.");
     } catch (err) {
@@ -258,45 +333,12 @@ export default function ReviewsPage() {
     }
   };
 
-  const filteredReviews = useMemo(() => {
-    const value = search.toLowerCase().trim();
+  const filteredReviews = reviews;
 
-    return reviews.filter((review) => {
-      const matchesSearch =
-        review.customerName.toLowerCase().includes(value) ||
-        review.customerPhone.includes(value) ||
-        review.productName.toLowerCase().includes(value) ||
-        review.orderNumber.toLowerCase().includes(value) ||
-        review.comment.toLowerCase().includes(value);
-
-      const matchesFilter =
-        filter === "All" || review.status === filter;
-
-      return matchesSearch && matchesFilter;
-    });
-  }, [reviews, search, filter]);
-
-  const pendingCount = reviews.filter(
-    (review) => review.status === "Pending"
-  ).length;
-
-  const approvedCount = reviews.filter(
-    (review) => review.status === "Approved"
-  ).length;
-
-  const rejectedCount = reviews.filter(
-    (review) => review.status === "Rejected"
-  ).length;
-
-  const averageRating =
-    reviews.length > 0
-      ? (
-          reviews.reduce(
-            (sum, review) => sum + review.rating,
-            0
-          ) / reviews.length
-        ).toFixed(1)
-      : "0.0";
+  const pendingCount = serverStats.pending;
+  const approvedCount = serverStats.approved;
+  const rejectedCount = serverStats.rejected;
+  const averageRating = serverStats.averageRating.toFixed(1);
 
   const statistics = [
     {
@@ -519,7 +561,7 @@ export default function ReviewsPage() {
                   marginBottom: 0,
                 }}
               >
-                Showing {filteredReviews.length} of {reviews.length} reviews
+                Showing {filteredReviews.length} of {totalReviews} reviews
               </p>
             </div>
 
@@ -528,7 +570,7 @@ export default function ReviewsPage() {
                 try {
                   setLoading(true);
                   setError("");
-                  await loadReviews();
+                  await loadReviews(page, pageCursor[page] || null, search, filter);
                 } catch (err) {
                   setError(
                     err instanceof Error
@@ -779,6 +821,48 @@ export default function ReviewsPage() {
             ))}
           </div>
         )}
+
+        <div
+          style={{
+            ...cardStyle,
+            marginTop: "20px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "12px",
+          }}
+        >
+          <span style={{ color: "#64748b", fontSize: "13px" }}>
+            Page {page} · {totalReviews} reviews
+          </span>
+
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              disabled={page <= 1 || loading}
+              onClick={() => goToPage(page - 1)}
+              style={{
+                ...buttonStyle,
+                opacity: page <= 1 || loading ? 0.5 : 1,
+                cursor: page <= 1 || loading ? "not-allowed" : "pointer",
+              }}
+            >
+              Previous
+            </button>
+
+            <button
+              disabled={!hasMore || loading}
+              onClick={() => goToPage(page + 1)}
+              style={{
+                ...buttonStyle,
+                opacity: !hasMore || loading ? 0.5 : 1,
+                cursor: !hasMore || loading ? "not-allowed" : "pointer",
+              }}
+            >
+              Next
+            </button>
+          </div>
+        </div>
       </div>
     </main>
   );

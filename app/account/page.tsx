@@ -83,6 +83,7 @@ export default function CustomerDashboardPage() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             phone: result.customer.phone,
@@ -193,7 +194,181 @@ export default function CustomerDashboardPage() {
               transform: rotate(360deg);
             }
           }
-        `}</style>
+
+        /* Premium Account Dashboard */
+        .customer-dashboard {
+          background: #f7f6fc;
+          color: #211b35;
+        }
+
+        .dashboard-header {
+          background: #ffffff;
+          border-bottom: 1px solid #eeeaf7;
+          box-shadow: 0 4px 18px rgba(35, 20, 75, 0.04);
+        }
+
+        .brand,
+        .dashboard-header nav a,
+        .dashboard-footer a {
+          color: #6941c6;
+        }
+
+        .welcome-section {
+          margin-bottom: 30px;
+        }
+
+        .welcome-section h1 {
+          color: #211b35;
+          letter-spacing: -0.7px;
+        }
+
+        .stats-grid {
+          gap: 18px;
+        }
+
+        .stat-card,
+        .panel {
+          border: 1px solid #eeeaf7;
+          border-radius: 17px;
+          box-shadow: 0 8px 26px rgba(35, 20, 75, 0.045);
+        }
+
+        .stat-card {
+          background: #ffffff;
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .stat-card:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 13px 30px rgba(75, 45, 135, 0.09);
+        }
+
+        .stat-icon {
+          background: #f1ebff;
+          color: #7045c7;
+          border-radius: 12px;
+        }
+
+        .stat-card h2,
+        .panel-heading h2,
+        .reward-panel h2 {
+          color: #211b35;
+        }
+
+        .section-label,
+        .eyebrow {
+          color: #7952ce;
+        }
+
+        .panel {
+          background: #ffffff;
+        }
+
+        .reward-panel {
+          background: linear-gradient(145deg, #241746 0%, #56339a 55%, #7651c8 100%);
+          border: 0;
+          box-shadow: 0 14px 32px rgba(65, 38, 120, 0.18);
+        }
+
+        .reward-panel .section-label {
+          color: #d9caff;
+        }
+
+        .reward-balance {
+          border-color: rgba(255, 255, 255, 0.22);
+          background: rgba(255, 255, 255, 0.12);
+          border-radius: 14px;
+        }
+
+        .shop-button {
+          color: #56339a;
+          border-radius: 10px;
+          transition: transform 0.2s ease, background 0.2s ease;
+        }
+
+        .shop-button:hover {
+          background: #f3edff;
+          transform: translateY(-2px);
+        }
+
+        .order-card {
+          border-color: #eeeaf7;
+          border-radius: 13px;
+          background: #ffffff;
+          transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .order-card:hover {
+          border-color: #d8c9f5;
+          box-shadow: 0 7px 20px rgba(75, 45, 135, 0.06);
+        }
+
+        .order-number {
+          color: #2b2042;
+        }
+
+        .order-count {
+          background: #f1ebff;
+          color: #6941c6;
+        }
+
+        .details-button {
+          border-color: #e4d9fa;
+          background: #f5f0ff;
+          color: #6941c6;
+          border-radius: 9px;
+          transition: background 0.2s ease;
+        }
+
+        .details-button:hover {
+          background: #eae0ff;
+        }
+
+        .tracking-link {
+          color: #6941c6;
+        }
+
+        .order-details {
+          background: #faf8ff;
+          border-color: #eeeaf7;
+        }
+
+        .profile-note {
+          background: #f3edff;
+          color: #6941c6;
+        }
+
+        .dashboard-footer {
+          border-top: 1px solid #eeeaf7;
+          margin-top: 35px;
+        }
+
+        @media (max-width: 600px) {
+          .dashboard-header {
+            gap: 12px;
+          }
+
+          .stats-grid {
+            gap: 11px;
+          }
+
+          .stat-card {
+            border-radius: 13px;
+          }
+
+          .panel {
+            border-radius: 14px;
+          }
+
+          .orders-panel {
+            padding: 19px;
+          }
+
+          .order-main {
+            padding: 15px;
+          }
+        }
+      `}</style>
       </main>
     );
   }
@@ -243,7 +418,181 @@ export default function CustomerDashboardPage() {
             font-weight: 700;
             text-decoration: none;
           }
-        `}</style>
+
+        /* Premium Account Dashboard */
+        .customer-dashboard {
+          background: #f7f6fc;
+          color: #211b35;
+        }
+
+        .dashboard-header {
+          background: #ffffff;
+          border-bottom: 1px solid #eeeaf7;
+          box-shadow: 0 4px 18px rgba(35, 20, 75, 0.04);
+        }
+
+        .brand,
+        .dashboard-header nav a,
+        .dashboard-footer a {
+          color: #6941c6;
+        }
+
+        .welcome-section {
+          margin-bottom: 30px;
+        }
+
+        .welcome-section h1 {
+          color: #211b35;
+          letter-spacing: -0.7px;
+        }
+
+        .stats-grid {
+          gap: 18px;
+        }
+
+        .stat-card,
+        .panel {
+          border: 1px solid #eeeaf7;
+          border-radius: 17px;
+          box-shadow: 0 8px 26px rgba(35, 20, 75, 0.045);
+        }
+
+        .stat-card {
+          background: #ffffff;
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .stat-card:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 13px 30px rgba(75, 45, 135, 0.09);
+        }
+
+        .stat-icon {
+          background: #f1ebff;
+          color: #7045c7;
+          border-radius: 12px;
+        }
+
+        .stat-card h2,
+        .panel-heading h2,
+        .reward-panel h2 {
+          color: #211b35;
+        }
+
+        .section-label,
+        .eyebrow {
+          color: #7952ce;
+        }
+
+        .panel {
+          background: #ffffff;
+        }
+
+        .reward-panel {
+          background: linear-gradient(145deg, #241746 0%, #56339a 55%, #7651c8 100%);
+          border: 0;
+          box-shadow: 0 14px 32px rgba(65, 38, 120, 0.18);
+        }
+
+        .reward-panel .section-label {
+          color: #d9caff;
+        }
+
+        .reward-balance {
+          border-color: rgba(255, 255, 255, 0.22);
+          background: rgba(255, 255, 255, 0.12);
+          border-radius: 14px;
+        }
+
+        .shop-button {
+          color: #56339a;
+          border-radius: 10px;
+          transition: transform 0.2s ease, background 0.2s ease;
+        }
+
+        .shop-button:hover {
+          background: #f3edff;
+          transform: translateY(-2px);
+        }
+
+        .order-card {
+          border-color: #eeeaf7;
+          border-radius: 13px;
+          background: #ffffff;
+          transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .order-card:hover {
+          border-color: #d8c9f5;
+          box-shadow: 0 7px 20px rgba(75, 45, 135, 0.06);
+        }
+
+        .order-number {
+          color: #2b2042;
+        }
+
+        .order-count {
+          background: #f1ebff;
+          color: #6941c6;
+        }
+
+        .details-button {
+          border-color: #e4d9fa;
+          background: #f5f0ff;
+          color: #6941c6;
+          border-radius: 9px;
+          transition: background 0.2s ease;
+        }
+
+        .details-button:hover {
+          background: #eae0ff;
+        }
+
+        .tracking-link {
+          color: #6941c6;
+        }
+
+        .order-details {
+          background: #faf8ff;
+          border-color: #eeeaf7;
+        }
+
+        .profile-note {
+          background: #f3edff;
+          color: #6941c6;
+        }
+
+        .dashboard-footer {
+          border-top: 1px solid #eeeaf7;
+          margin-top: 35px;
+        }
+
+        @media (max-width: 600px) {
+          .dashboard-header {
+            gap: 12px;
+          }
+
+          .stats-grid {
+            gap: 11px;
+          }
+
+          .stat-card {
+            border-radius: 13px;
+          }
+
+          .panel {
+            border-radius: 14px;
+          }
+
+          .orders-panel {
+            padding: 19px;
+          }
+
+          .order-main {
+            padding: 15px;
+          }
+        }
+      `}</style>
       </main>
     );
   }
@@ -1077,6 +1426,180 @@ export default function CustomerDashboardPage() {
           .dashboard-footer {
             flex-direction: column;
             text-align: center;
+          }
+        }
+
+        /* Premium Account Dashboard */
+        .customer-dashboard {
+          background: #f7f6fc;
+          color: #211b35;
+        }
+
+        .dashboard-header {
+          background: #ffffff;
+          border-bottom: 1px solid #eeeaf7;
+          box-shadow: 0 4px 18px rgba(35, 20, 75, 0.04);
+        }
+
+        .brand,
+        .dashboard-header nav a,
+        .dashboard-footer a {
+          color: #6941c6;
+        }
+
+        .welcome-section {
+          margin-bottom: 30px;
+        }
+
+        .welcome-section h1 {
+          color: #211b35;
+          letter-spacing: -0.7px;
+        }
+
+        .stats-grid {
+          gap: 18px;
+        }
+
+        .stat-card,
+        .panel {
+          border: 1px solid #eeeaf7;
+          border-radius: 17px;
+          box-shadow: 0 8px 26px rgba(35, 20, 75, 0.045);
+        }
+
+        .stat-card {
+          background: #ffffff;
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .stat-card:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 13px 30px rgba(75, 45, 135, 0.09);
+        }
+
+        .stat-icon {
+          background: #f1ebff;
+          color: #7045c7;
+          border-radius: 12px;
+        }
+
+        .stat-card h2,
+        .panel-heading h2,
+        .reward-panel h2 {
+          color: #211b35;
+        }
+
+        .section-label,
+        .eyebrow {
+          color: #7952ce;
+        }
+
+        .panel {
+          background: #ffffff;
+        }
+
+        .reward-panel {
+          background: linear-gradient(145deg, #241746 0%, #56339a 55%, #7651c8 100%);
+          border: 0;
+          box-shadow: 0 14px 32px rgba(65, 38, 120, 0.18);
+        }
+
+        .reward-panel .section-label {
+          color: #d9caff;
+        }
+
+        .reward-balance {
+          border-color: rgba(255, 255, 255, 0.22);
+          background: rgba(255, 255, 255, 0.12);
+          border-radius: 14px;
+        }
+
+        .shop-button {
+          color: #56339a;
+          border-radius: 10px;
+          transition: transform 0.2s ease, background 0.2s ease;
+        }
+
+        .shop-button:hover {
+          background: #f3edff;
+          transform: translateY(-2px);
+        }
+
+        .order-card {
+          border-color: #eeeaf7;
+          border-radius: 13px;
+          background: #ffffff;
+          transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .order-card:hover {
+          border-color: #d8c9f5;
+          box-shadow: 0 7px 20px rgba(75, 45, 135, 0.06);
+        }
+
+        .order-number {
+          color: #2b2042;
+        }
+
+        .order-count {
+          background: #f1ebff;
+          color: #6941c6;
+        }
+
+        .details-button {
+          border-color: #e4d9fa;
+          background: #f5f0ff;
+          color: #6941c6;
+          border-radius: 9px;
+          transition: background 0.2s ease;
+        }
+
+        .details-button:hover {
+          background: #eae0ff;
+        }
+
+        .tracking-link {
+          color: #6941c6;
+        }
+
+        .order-details {
+          background: #faf8ff;
+          border-color: #eeeaf7;
+        }
+
+        .profile-note {
+          background: #f3edff;
+          color: #6941c6;
+        }
+
+        .dashboard-footer {
+          border-top: 1px solid #eeeaf7;
+          margin-top: 35px;
+        }
+
+        @media (max-width: 600px) {
+          .dashboard-header {
+            gap: 12px;
+          }
+
+          .stats-grid {
+            gap: 11px;
+          }
+
+          .stat-card {
+            border-radius: 13px;
+          }
+
+          .panel {
+            border-radius: 14px;
+          }
+
+          .orders-panel {
+            padding: 19px;
+          }
+
+          .order-main {
+            padding: 15px;
           }
         }
       `}</style>

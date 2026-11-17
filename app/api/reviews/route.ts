@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
-import { FieldValue } from "firebase-admin/firestore";
+import { AggregateField, FieldPath, FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebase-admin";
 
 export const runtime = "nodejs";
@@ -9,64 +9,128 @@ function normalizePhone(value: unknown) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function isValidProductId(value: string | null) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    !value.includes("/") &&
+    !/[\u0000-\u001F\u007F]/.test(value)
+  );
+}
+
 export async function GET(request: NextRequest) {
   try {
     const productId = request.nextUrl.searchParams.get("productId");
+    const cursor = request.nextUrl.searchParams.get("cursor");
 
-    if (!productId) {
+    if (!isValidProductId(productId)) {
       return NextResponse.json(
-        { success: false, message: "Product ID is required." },
+        { success: false, message: "Invalid product ID." },
         { status: 400 }
       );
     }
 
-    const snapshot = await adminDb
-      .collection("reviews")
+    if (
+      cursor &&
+      (
+        cursor.length > 128 ||
+        cursor.includes("/") ||
+        /[\u0000-\u001F\u007F]/.test(cursor)
+      )
+    ) {
+      return NextResponse.json(
+        { success: false, message: "Invalid review cursor." },
+        { status: 400 }
+      );
+    }
+
+    const PAGE_SIZE = 10;
+    const reviewsRef = adminDb.collection("reviews");
+
+    const approvedReviewsQuery = reviewsRef
       .where("productId", "==", productId)
-      .get();
+      .where("status", "==", "Approved");
 
-    const reviews = snapshot.docs
-      .filter((reviewDoc) => reviewDoc.data().status === "Approved")
-      .map((reviewDoc) => {
-        const data = reviewDoc.data();
+    const [aggregateSnapshot, cursorSnapshot] = await Promise.all([
+      approvedReviewsQuery
+        .aggregate({
+          totalReviews: AggregateField.count(),
+          averageRating: AggregateField.average("rating"),
+        })
+        .get(),
+      cursor
+        ? reviewsRef.doc(cursor).get()
+        : Promise.resolve(null),
+    ]);
 
-        return {
-          id: reviewDoc.id,
-          productId: data.productId,
-          productName: data.productName,
-          customerName: data.customerName,
-          rating: Number(data.rating) || 0,
-          comment: data.comment,
-          createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-        };
-      })
-      .sort((a, b) => {
-        return (
-          new Date(b.createdAt || 0).getTime() -
-          new Date(a.createdAt || 0).getTime()
-        );
-      });
+    if (
+      cursor &&
+      (
+        !cursorSnapshot?.exists ||
+        cursorSnapshot.data()?.productId !== productId ||
+        cursorSnapshot.data()?.status !== "Approved"
+      )
+    ) {
+      return NextResponse.json(
+        { success: false, message: "Invalid review cursor." },
+        { status: 400 }
+      );
+    }
 
-    const totalReviews = reviews.length;
+    let pageQuery = approvedReviewsQuery
+      .orderBy("createdAt", "desc")
+      .orderBy(FieldPath.documentId(), "desc");
 
+    if (cursorSnapshot?.exists) {
+      pageQuery = pageQuery.startAfter(cursorSnapshot);
+    }
+
+    const pageSnapshot = await pageQuery.limit(PAGE_SIZE + 1).get();
+
+    const hasMore = pageSnapshot.docs.length > PAGE_SIZE;
+    const pageDocs = pageSnapshot.docs.slice(0, PAGE_SIZE);
+
+    const reviews = pageDocs.map((reviewDoc) => {
+      const data = reviewDoc.data();
+
+      return {
+        id: reviewDoc.id,
+        productId: data.productId,
+        productName: String(data.productName || "Product"),
+        customerName: String(data.customerName || "Verified Customer"),
+        rating: Math.min(5, Math.max(0, Number(data.rating) || 0)),
+        comment: String(data.comment || ""),
+        createdAt:
+          data.createdAt?.toDate?.()?.toISOString() || null,
+      };
+    });
+
+    const aggregateData = aggregateSnapshot.data();
+    const totalReviews = Number(aggregateData.totalReviews || 0);
     const averageRating =
       totalReviews > 0
-        ? Number(
-            (
-              reviews.reduce(
-                (total, review) => total + review.rating,
-                0
-              ) / totalReviews
-            ).toFixed(1)
-          )
+        ? Number(Number(aggregateData.averageRating || 0).toFixed(1))
         : 0;
 
-    return NextResponse.json({
-      success: true,
-      reviews,
-      totalReviews,
-      averageRating,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        reviews,
+        totalReviews,
+        averageRating,
+        pageSize: PAGE_SIZE,
+        hasMore,
+        nextCursor: hasMore
+          ? pageDocs[pageDocs.length - 1].id
+          : null,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
+    );
   } catch (error) {
     console.error("Review loading error:", error);
 
@@ -91,6 +155,13 @@ export async function POST(request: NextRequest) {
     if (!productId || !orderNumber || !phone) {
       return NextResponse.json(
         { success: false, message: "Please provide all order details." },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidProductId(productId)) {
+      return NextResponse.json(
+        { success: false, message: "Invalid product ID." },
         { status: 400 }
       );
     }
@@ -211,13 +282,39 @@ export async function POST(request: NextRequest) {
       .digest("hex");
 
     const reviewRef = adminDb.collection("reviews").doc(reviewId);
+    const rateLimitId = createHash("sha256").update(phone).digest("hex");
+    const rateLimitRef = adminDb.collection("reviewRateLimits").doc(rateLimitId);
 
     await adminDb.runTransaction(async (transaction) => {
       const existingReview = await transaction.get(reviewRef);
+      const rateLimitSnapshot = await transaction.get(rateLimitRef);
 
       if (existingReview.exists) {
         throw new Error("REVIEW_ALREADY_EXISTS");
       }
+
+      const now = Date.now();
+      const rateLimitData = rateLimitSnapshot.data();
+      const windowStartedAtMs = Number(rateLimitData?.windowStartedAtMs || 0);
+      const previousCount = Number(rateLimitData?.count || 0);
+      const windowMs = 60 * 60 * 1000;
+
+      const windowExpired =
+        !windowStartedAtMs ||
+        now - windowStartedAtMs >= windowMs ||
+        now < windowStartedAtMs;
+
+      const currentCount = windowExpired ? 0 : previousCount;
+
+      if (currentCount >= 5) {
+        throw new Error("REVIEW_RATE_LIMITED");
+      }
+
+      transaction.set(rateLimitRef, {
+        windowStartedAtMs: windowExpired ? now : windowStartedAtMs,
+        count: currentCount + 1,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
 
       transaction.set(reviewRef, {
         productId,
@@ -233,12 +330,24 @@ export async function POST(request: NextRequest) {
         updatedAt: FieldValue.serverTimestamp(),
       });
     });
-
     return NextResponse.json({
       success: true,
       message: "Your review has been submitted for approval.",
     });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "REVIEW_RATE_LIMITED"
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "You have submitted too many reviews. Please try again later.",
+        },
+        { status: 429 }
+      );
+    }
+
     if (
       error instanceof Error &&
       error.message === "REVIEW_ALREADY_EXISTS"

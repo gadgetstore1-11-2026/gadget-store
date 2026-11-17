@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import Image from "next/image";
 
 import { useEffect, useState } from "react";
@@ -30,7 +30,6 @@ type Product = {
   images: string[];
   specifications: Record<string, string>;
 };
-
 type Category = {
 id: string;
 name: string;
@@ -1101,4 +1100,3 @@ fontSize: "12px",
 padding: "35px 0 10px",
 },
 };
-

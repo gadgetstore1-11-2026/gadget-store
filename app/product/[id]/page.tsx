@@ -1,5 +1,6 @@
-"use client";
+﻿"use client";
 import Image from "next/image";
+import ProductShare from "@/components/ProductShare";
 
 import "../../product-details.css";
 
@@ -65,6 +66,9 @@ export default function ProductDetailsPage() {
   const [averageRating, setAverageRating] = useState(0);
   const [totalReviews, setTotalReviews] = useState(0);
   const [reviewsLoading, setReviewsLoading] = useState(true);
+const [reviewsLoadingMore, setReviewsLoadingMore] = useState(false);
+const [reviewsHasMore, setReviewsHasMore] = useState(false);
+const [nextReviewCursor, setNextReviewCursor] = useState<string | null>(null);
   const [reviewOrderId, setReviewOrderId] = useState("");
   const [orderNumber, setOrderNumber] = useState("");
   const [reviewPhone, setReviewPhone] = useState("");
@@ -73,27 +77,61 @@ export default function ProductDetailsPage() {
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewMessage, setReviewMessage] = useState("");
 
-  async function loadReviews() {
-    setReviewsLoading(true);
+  async function loadReviews(cursor?: string | null, append = false) {
+    if (append) {
+      setReviewsLoadingMore(true);
+    } else {
+      setReviewsLoading(true);
+      setReviews([]);
+      setNextReviewCursor(null);
+      setReviewsHasMore(false);
+    }
+
     try {
+      const params = new URLSearchParams({
+        productId: productId,
+      });
+
+      if (cursor) {
+        params.set("cursor", cursor);
+      }
+
       const response = await fetch(
-        `/api/reviews?productId=${encodeURIComponent(productId)}`,
+        `/api/reviews?${params.toString()}`,
         { cache: "no-store" }
       );
+
       const result = await response.json();
+
       if (!response.ok || !result.success) {
         throw new Error(result.message || "Could not load reviews.");
       }
-      setReviews(Array.isArray(result.reviews) ? result.reviews : []);
+
+      const newReviews: Review[] = Array.isArray(result.reviews)
+        ? result.reviews
+        : [];
+
+      setReviews((previous) =>
+        append ? [...previous, ...newReviews] : newReviews
+      );
+
       setAverageRating(Number(result.averageRating) || 0);
       setTotalReviews(Number(result.totalReviews) || 0);
+      setReviewsHasMore(Boolean(result.hasMore));
+      setNextReviewCursor(result.nextCursor || null);
     } catch (error) {
       console.error("Review loading error:", error);
-      setReviews([]);
-      setAverageRating(0);
-      setTotalReviews(0);
+
+      if (!append) {
+        setReviews([]);
+        setAverageRating(0);
+        setTotalReviews(0);
+        setReviewsHasMore(false);
+        setNextReviewCursor(null);
+      }
     } finally {
       setReviewsLoading(false);
+      setReviewsLoadingMore(false);
     }
   }
 
@@ -158,7 +196,7 @@ export default function ProductDetailsPage() {
           description: String(data.description || ""),
           imageUrl: String(data.imageUrl || DEFAULT_IMAGE),
           stock: Math.max(0, Number(data.stock ?? 0)),
-          rating: Number(data.rating || 4.8),
+          rating: Number(data.rating) || 0,
           badge: String(data.badge || ""),
           emoji: String(data.emoji || "📦"),
           color: String(data.color || "#f3f6fb"),
@@ -201,7 +239,7 @@ export default function ProductDetailsPage() {
         const relatedSnapshot = await getDocs(relatedQuery);
 
         const related = relatedSnapshot.docs
-          .filter((item) => item.id !== currentProduct.id)
+          .filter((item) => item.id !== currentProduct.id && Number(item.data().stock ?? 0) > 0)
           .map((item) => {
             const itemData = item.data();
 
@@ -216,8 +254,10 @@ export default function ProductDetailsPage() {
               stock: Math.max(0, Number(itemData.stock ?? 0)),
               emoji: String(itemData.emoji || "📦"),
               color: String(itemData.color || "#f3f6fb"),
+              rating: Number(itemData.rating) || 0,
             };
-          });
+          })
+          .sort((a, b) => (b.rating || 0) - (a.rating || 0));
 
         setRelatedProducts(related);
       } catch (error) {
@@ -445,7 +485,7 @@ export default function ProductDetailsPage() {
           <div className="pd-info">
             <span className="pd-category">{product.category}</span>
 
-            <h1>{product.name}</h1>
+            <div className="pd-title-row"><h1>{product.name}</h1><ProductShare productId={product.id} productName={product.name} className="pd-share-button" /></div>
 
             <div className="pd-rating">
               {totalReviews > 0 ? (
@@ -586,6 +626,22 @@ export default function ProductDetailsPage() {
             </div>
           )}
 
+          {!reviewsLoading && reviewsHasMore && (
+            <div className="pd-review-load-more">
+              <button
+                type="button"
+                className="pd-review-submit"
+                onClick={() => {
+                  if (nextReviewCursor && !reviewsLoadingMore) {
+                    void loadReviews(nextReviewCursor, true);
+                  }
+                }}
+                disabled={reviewsLoadingMore || !nextReviewCursor}
+              >
+                {reviewsLoadingMore ? "Loading..." : "Load More Reviews"}
+              </button>
+            </div>
+          )}
           <form className="pd-review-form" onSubmit={handleReviewSubmit}>
             <h3>Write a Review</h3>
             <p>Reviews are accepted only for delivered orders and are published after admin approval.</p>
